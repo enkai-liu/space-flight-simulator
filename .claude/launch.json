@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "client",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@sfs/client", "dev", "--port", "5173"],
+      "port": 5173
+    },
+    {
+      "name": "server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@sfs/server", "dev"],
+      "port": 8081
+    }
+  ]
+}

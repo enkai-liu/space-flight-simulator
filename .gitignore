@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+*.db
+packages/server/data/
+packages/client/ios/App/build/
+packages/client/ios/DerivedData/

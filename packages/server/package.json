@@ -1,0 +1,23 @@
+{
+  "name": "@sfs/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@sfs/data": "workspace:*",
+    "@sfs/protocol": "workspace:*",
+    "@sfs/sim": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.19.0"
+  }
+}
