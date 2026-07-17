@@ -18,6 +18,7 @@ import { VesselRenderer } from '../render/VesselRenderer.js';
 import { LaunchSite } from '../render/LaunchSite.js';
 import { MapView } from '../render/MapView.js';
 import { PostFX } from '../render/PostFX.js';
+import { Trail } from '../render/Trail.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Hud } from '../ui/hud.js';
 import type { NetClient } from '../net/NetClient.js';
@@ -125,6 +126,9 @@ export function startFlight(
   const launchSite = new LaunchSite(tree, 'terra', PAD_LONGITUDE);
   scene.add(launchSite.object);
   floatingOrigin.register(launchSite.object, () => launchSite.globalPosition(sim.simTime));
+
+  const trail = new Trail();
+  scene.add(trail.object);
 
   const ownGlobalPos = (): Vec3 => {
     if (!sim.hasVessel(VESSEL_ID)) return launchSite.globalPosition(sim.simTime);
@@ -356,6 +360,10 @@ export function startFlight(
           vr.update(sim.getVessel(id));
           vr.object.visible = !sim.getVessel(id).destroyed;
         }
+      }
+
+      if (hasOwn && !sim.getVessel(VESSEL_ID).destroyed) {
+        trail.update(ownGlobalPos(), cameraGlobal, sim.simTime);
       }
 
       const sunRel = simToRender(tree.globalState('helios', sim.simTime).r.sub(cameraGlobal));
