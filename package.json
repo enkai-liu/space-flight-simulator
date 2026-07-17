@@ -6,9 +6,13 @@
     "dev": "pnpm --filter @sfs/client dev",
     "build": "pnpm -r build",
     "test": "vitest run",
-    "typecheck": "pnpm -r --parallel exec tsc --noEmit"
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "typecheck": "pnpm -r --parallel exec tsc --noEmit && tsc -p e2e"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^22.20.0",
     "typescript": "^5.5.0",
     "vitest": "^2.1.0"
   },

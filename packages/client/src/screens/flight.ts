@@ -211,6 +211,7 @@ export function startFlight(
 
   // --- multiplayer sync ---
   let unsubscribeNet: (() => void) | null = null;
+  let lobbyCode: string | null = null;
   if (net) {
     const applySnapshot = (snapshot: VesselSnapshot, simTime: number): void => {
       const isOwn = snapshot.ownerId === net.playerId;
@@ -262,6 +263,7 @@ export function startFlight(
           sim.setWarp(msg.warp);
           for (const snapshot of msg.vessels) applySnapshot(snapshot, msg.simTime);
           net.send({ type: 'launchVessel', craft: design });
+          lobbyCode = msg.code;
           hud.showToast(`LOBBY CODE: ${msg.code}`);
           break;
         case 'vesselSpawned':
@@ -395,6 +397,8 @@ export function startFlight(
       },
       stage: () => inputs.stage(),
       readout: () => sim.vesselReadout(VESSEL_ID),
+      vesselIds: () => [...sim.vessels()].map((v) => v.id),
+      lobbyCode: () => lobbyCode,
     };
     w.__sfsMap = mapView;
   }
