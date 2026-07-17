@@ -17,6 +17,7 @@ import { OrbitCamera } from '../render/OrbitCamera.js';
 import { VesselRenderer } from '../render/VesselRenderer.js';
 import { LaunchSite } from '../render/LaunchSite.js';
 import { MapView } from '../render/MapView.js';
+import { PostFX } from '../render/PostFX.js';
 import { Hud } from '../ui/hud.js';
 import type { NetClient } from '../net/NetClient.js';
 
@@ -58,6 +59,7 @@ export function startFlight(
 ): FlightScreen {
   const net = netContext?.client;
   const debug = new URLSearchParams(location.search).has('debug');
+  const nofx = new URLSearchParams(location.search).has('nofx');
   const config = compileCraft(design, PART_CATALOG);
 
   // --- renderer ---
@@ -74,6 +76,7 @@ export function startFlight(
   scene.add(sunLight);
   scene.add(new THREE.AmbientLight(0x445566, 0.5));
   scene.add(new THREE.HemisphereLight(0x8fb4e8, 0x3a4a33, 0.55));
+  const postFx = nofx ? null : new PostFX(renderer, scene, camera);
 
   // --- simulation ---
   const tree = new SystemTree(SOLAR_SYSTEM);
@@ -352,7 +355,8 @@ export function startFlight(
       sunLight.position.copy(sunRel);
       sunLight.target.position.set(0, 0, 0);
 
-      renderer.render(scene, camera);
+      if (postFx) postFx.render();
+      else renderer.render(scene, camera);
     }
 
     frames++;
@@ -378,6 +382,7 @@ export function startFlight(
     camera.updateProjectionMatrix();
     mapView.resize(innerWidth / innerHeight);
     renderer.setSize(innerWidth, innerHeight);
+    postFx?.setSize(innerWidth, innerHeight);
   };
   addEventListener('resize', onResize);
 
@@ -411,6 +416,7 @@ export function startFlight(
       net?.send({ type: 'leaveLobby' });
       hud.dispose();
       debugEl?.remove();
+      postFx?.dispose();
       renderer.dispose();
       renderer.domElement.remove();
       if (import.meta.env.DEV) {
