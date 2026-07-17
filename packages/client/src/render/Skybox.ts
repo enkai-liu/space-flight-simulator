@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { fbm, makeLcg, makeNoise3 } from './noise.js';
 
 /**
  * Sky backdrop: a procedural nebula dome plus layered star fields, all on
@@ -12,14 +13,6 @@ const BAND_NORMAL = new THREE.Vector3(0.32, 0.87, 0.38).normalize();
 
 const STAR_RADIUS = 5e12; // far beyond everything; log depth buffer copes
 const NEBULA_RADIUS = 8e12; // behind the stars, inside the 1e13 far plane
-
-function makeLcg(seed: number): () => number {
-  let s = seed;
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
-}
 
 /** One layer of stars; a fraction sits pulled toward the galactic band. */
 function makeStarLayer(opts: {
@@ -78,47 +71,6 @@ function makeStarLayer(opts: {
   points.frustumCulled = false;
   points.renderOrder = -1;
   return points;
-}
-
-/** 3D value noise + fbm, sampled on the sphere so the poles don't pinch. */
-function makeNoise3(seed: number): (x: number, y: number, z: number) => number {
-  const hash = (xi: number, yi: number, zi: number): number => {
-    let h = (xi * 374761393 + yi * 668265263 + zi * 2147483647 + seed * 144665) | 0;
-    h = Math.imul(h ^ (h >>> 13), 1274126177);
-    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-  };
-  const smooth = (t: number): number => t * t * (3 - 2 * t);
-  return (x, y, z) => {
-    const xi = Math.floor(x);
-    const yi = Math.floor(y);
-    const zi = Math.floor(z);
-    const tx = smooth(x - xi);
-    const ty = smooth(y - yi);
-    const tz = smooth(z - zi);
-    let v = 0;
-    for (let dz = 0; dz <= 1; dz++) {
-      for (let dy = 0; dy <= 1; dy++) {
-        for (let dx = 0; dx <= 1; dx++) {
-          const w =
-            (dx ? tx : 1 - tx) * (dy ? ty : 1 - ty) * (dz ? tz : 1 - tz);
-          v += w * hash(xi + dx, yi + dy, zi + dz);
-        }
-      }
-    }
-    return v;
-  };
-}
-
-function fbm(noise: (x: number, y: number, z: number) => number, x: number, y: number, z: number, octaves: number): number {
-  let sum = 0;
-  let amp = 0.5;
-  let freq = 1;
-  for (let o = 0; o < octaves; o++) {
-    sum += amp * noise(x * freq, y * freq, z * freq);
-    amp *= 0.5;
-    freq *= 2.07;
-  }
-  return sum;
 }
 
 /** Very dark color-cloud dome; brightest along the galactic band. */

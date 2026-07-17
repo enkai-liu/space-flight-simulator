@@ -29,10 +29,16 @@ export class VesselRenderer {
   readonly object = new THREE.Group();
   private readonly sectionGroups: THREE.Group[] = [];
   private readonly sectionBottoms: number[] = [];
-  private readonly plume: THREE.Mesh;
+  private readonly plume: THREE.Group;
+  private readonly plumeOuter: THREE.Mesh;
+  private readonly plumeInner: THREE.Mesh;
+  private readonly engineLight: THREE.PointLight;
+  private readonly envMap: THREE.Texture | null;
+
   private totalSections: number;
 
-  constructor(design: CraftDesign, catalog: Map<string, PartDef>) {
+  constructor(design: CraftDesign, catalog: Map<string, PartDef>, envMap?: THREE.Texture) {
+    this.envMap = envMap ?? null;
     // stack heights by iid
     const heights = new Map<number, { y0: number; def: PartDef }>();
     let y = 0;
@@ -57,17 +63,37 @@ export class VesselRenderer {
       this.object.add(group);
     }
 
-    const plumeMaterial = new THREE.MeshBasicMaterial({
+    // layered exhaust: white-hot core inside an orange sheath, both HDR so
+    // they bloom; per-frame flicker happens in update()
+    const outerMaterial = new THREE.MeshBasicMaterial({
       transparent: true,
       opacity: 0.85,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
-    // HDR orange: crosses the bloom threshold so the exhaust glows
-    plumeMaterial.color.setRGB(2.0, 1.3, 0.5);
-    this.plume = new THREE.Mesh(new THREE.ConeGeometry(0.55, 5, 16), plumeMaterial);
+    outerMaterial.color.setRGB(2.0, 1.3, 0.5);
+    this.plumeOuter = new THREE.Mesh(new THREE.ConeGeometry(0.55, 5, 16), outerMaterial);
+
+    const innerMaterial = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    innerMaterial.color.setRGB(2.8, 2.5, 1.9);
+    this.plumeInner = new THREE.Mesh(new THREE.ConeGeometry(0.26, 3.4, 12), innerMaterial);
+    this.plumeInner.position.y = 0.8;
+
+    this.plume = new THREE.Group();
+    this.plume.add(this.plumeOuter);
+    this.plume.add(this.plumeInner);
     this.plume.visible = false;
     this.object.add(this.plume);
+
+    // warm light cast on the pad and the hull while thrusting
+    this.engineLight = new THREE.PointLight(0xffa040, 0, 80, 1.8);
+    this.engineLight.visible = false;
+    this.object.add(this.engineLight);
 
     this.topY = y;
 
@@ -110,7 +136,15 @@ export class VesselRenderer {
     heights: Map<number, { y0: number; def: PartDef }>,
   ): THREE.Mesh | null {
     const color = CATEGORY_COLORS[def.category] ?? 0x999999;
-    const material = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.15 });
+    // polished metal hull for the big bodywork, duller finish elsewhere
+    const shiny = def.category === 'tank' || def.category === 'capsule' || def.category === 'nose';
+    const material = new THREE.MeshStandardMaterial({
+      color,
+      roughness: shiny ? 0.32 : 0.5,
+      metalness: shiny ? 0.8 : 0.45,
+      envMap: this.envMap ?? undefined,
+      envMapIntensity: 0.9,
+    });
     const { rTop, rBottom, height } = def.shape;
 
     if (isStackPart(part)) {
@@ -148,10 +182,17 @@ export class VesselRenderer {
 
     const thrusting = vessel.currentThrust() > 0;
     this.plume.visible = thrusting;
+    this.engineLight.visible = thrusting;
     if (thrusting) {
       const bottom = this.sectionBottoms[gone] ?? 0;
+      const flicker = 0.92 + Math.random() * 0.16;
       this.plume.position.y = bottom - 2.2;
-      this.plume.scale.set(1, 0.5 + vessel.throttle, 1);
+      this.plume.scale.set(1, (0.5 + vessel.throttle) * flicker, 1);
+      (this.plumeOuter.material as THREE.MeshBasicMaterial).opacity = 0.72 + Math.random() * 0.18;
+      this.engineLight.position.y = bottom - 1.2;
+      this.engineLight.intensity = (26 + 60 * vessel.throttle) * flicker;
+    } else {
+      this.engineLight.intensity = 0;
     }
 
     // plasma fades in as the skin heats past ~15% of tolerance

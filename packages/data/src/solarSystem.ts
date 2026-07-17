@@ -17,6 +17,14 @@ export interface BodyAppearance {
   atmosphereColor?: string;
   /** emissive (stars) */
   emissive?: boolean;
+  /** land/sea split: specular oceans below the height threshold, plus clouds */
+  ocean?: boolean;
+  /** icy polar caps */
+  polarCaps?: boolean;
+  /** latitude-banded gas-giant surface */
+  gasBands?: boolean;
+  /** ring system */
+  ring?: boolean;
 }
 
 /** Input format: soiRadius is derived below, not hand-maintained. */
@@ -162,12 +170,12 @@ export const BODY_APPEARANCE: Record<string, BodyAppearance> = {
   helios: { color: '#fff3c4', accentColor: '#ffd166', emissive: true },
   vulcan: { color: '#8a6a4f', accentColor: '#5c4433' },
   aphros: { color: '#7a5296', accentColor: '#5d3f78', atmosphereColor: '#b48ad6' },
-  terra: { color: '#3a7bd5', accentColor: '#4f9e4f', atmosphereColor: '#7ec8ff' },
+  terra: { color: '#3a7bd5', accentColor: '#4f9e4f', atmosphereColor: '#7ec8ff', ocean: true, polarCaps: true },
   luna: { color: '#9a9a9a', accentColor: '#6e6e6e' },
   pico: { color: '#b8d8cf', accentColor: '#8fb5ab' },
-  ares: { color: '#c1653e', accentColor: '#8f4a2d', atmosphereColor: '#e8a583' },
+  ares: { color: '#c1653e', accentColor: '#8f4a2d', atmosphereColor: '#e8a583', polarCaps: true },
   deimos: { color: '#7d7468', accentColor: '#5a534a' },
-  jove: { color: '#6f9e58', accentColor: '#4d7a3c', atmosphereColor: '#a8d68f' },
-  thalassa: { color: '#3f6fa8', accentColor: '#7a9e6f', atmosphereColor: '#9cc4e8' },
+  jove: { color: '#6f9e58', accentColor: '#4d7a3c', atmosphereColor: '#a8d68f', gasBands: true, ring: true },
+  thalassa: { color: '#3f6fa8', accentColor: '#7a9e6f', atmosphereColor: '#9cc4e8', ocean: true },
   kallo: { color: '#cdc3b4', accentColor: '#a89e8d' },
 };

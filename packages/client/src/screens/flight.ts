@@ -18,6 +18,7 @@ import { VesselRenderer } from '../render/VesselRenderer.js';
 import { LaunchSite } from '../render/LaunchSite.js';
 import { MapView } from '../render/MapView.js';
 import { PostFX } from '../render/PostFX.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Hud } from '../ui/hud.js';
 import type { NetClient } from '../net/NetClient.js';
 
@@ -78,6 +79,12 @@ export function startFlight(
   scene.add(new THREE.HemisphereLight(0x8fb4e8, 0x3a4a33, 0.55));
   const postFx = nofx ? null : new PostFX(renderer, scene, camera);
 
+  // shared env map for vessel metal; applied per-material, NOT scene.environment
+  // (that would wash out every planet's MeshStandardMaterial)
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const vesselEnvMap = pmrem.fromScene(new RoomEnvironment()).texture;
+  pmrem.dispose();
+
   // --- simulation ---
   const tree = new SystemTree(SOLAR_SYSTEM);
   const sim = new Simulation(tree);
@@ -89,7 +96,7 @@ export function startFlight(
   const vesselRenderers = new Map<string, VesselRenderer>();
 
   function addVesselRenderer(id: string, craft: CraftDesign): VesselRenderer {
-    const vr = new VesselRenderer(craft, PART_CATALOG);
+    const vr = new VesselRenderer(craft, PART_CATALOG, vesselEnvMap);
     vesselRenderers.set(id, vr);
     scene.add(vr.object);
     floatingOrigin.register(vr.object, () => {
@@ -417,6 +424,7 @@ export function startFlight(
       hud.dispose();
       debugEl?.remove();
       postFx?.dispose();
+      vesselEnvMap.dispose();
       renderer.dispose();
       renderer.domElement.remove();
       if (import.meta.env.DEV) {
