@@ -58,12 +58,13 @@ export class VesselRenderer {
     }
 
     const plumeMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffa53d,
       transparent: true,
       opacity: 0.85,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
+    // HDR orange: crosses the bloom threshold so the exhaust glows
+    plumeMaterial.color.setRGB(2.0, 1.3, 0.5);
     this.plume = new THREE.Mesh(new THREE.ConeGeometry(0.55, 5, 16), plumeMaterial);
     this.plume.visible = false;
     this.object.add(this.plume);
@@ -71,16 +72,15 @@ export class VesselRenderer {
     this.topY = y;
 
     // re-entry plasma shroud (opacity driven by skin heat)
-    this.plasma = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 20, 14),
-      new THREE.MeshBasicMaterial({
-        color: 0xff7838,
-        transparent: true,
-        opacity: 0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      }),
-    );
+    const plasmaMaterial = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    // HDR so the re-entry shroud blooms once heat builds
+    plasmaMaterial.color.setRGB(2.2, 1.0, 0.45);
+    this.plasma = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), plasmaMaterial);
     this.plasma.scale.set(2.2, Math.max(3, y * 0.8), 2.2);
     this.plasma.position.y = y / 2;
     this.plasma.visible = false;

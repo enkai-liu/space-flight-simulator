@@ -52,6 +52,39 @@ function makeSurfaceTexture(appearance: BodyAppearance, seed: number): THREE.Tex
   return texture;
 }
 
+/**
+ * Billboard glow around the star. Depth-tested (but not depth-writing) so the
+ * body's own disc and any planet in front occlude it correctly; only the halo
+ * past the limb survives, which is exactly the look we want.
+ */
+function makeGlowSprite(radius: number): THREE.Sprite {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(255, 246, 220, 1)');
+  g.addColorStop(0.22, 'rgba(255, 218, 140, 0.6)');
+  g.addColorStop(0.55, 'rgba(255, 176, 90, 0.18)');
+  g.addColorStop(1, 'rgba(255, 150, 60, 0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: texture,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+    }),
+  );
+  sprite.scale.setScalar(radius * 8);
+  return sprite;
+}
+
 /** Additive fresnel-rim shell that fakes an atmosphere from orbit. */
 function makeAtmosphereShell(radius: number, color: string): THREE.Mesh {
   const material = new THREE.ShaderMaterial({
@@ -103,6 +136,8 @@ export function createBodyObject(body: CelestialBodyDef, appearance: BodyAppeara
   const material = appearance.emissive
     ? new THREE.MeshBasicMaterial({ map: texture })
     : new THREE.MeshStandardMaterial({ map: texture, roughness: 1, metalness: 0 });
+  // HDR: push the star's disc past the bloom threshold so it glows
+  if (appearance.emissive) material.color.setRGB(2.5, 2.2, 1.6);
   const surface = new THREE.Mesh(geometry, material);
   surface.name = `${body.id}-surface`;
   group.add(surface);
@@ -112,8 +147,9 @@ export function createBodyObject(body: CelestialBodyDef, appearance: BodyAppeara
   }
 
   if (appearance.emissive) {
-    // a faint glow shell for the star
+    // a faint glow shell plus a billboard halo for the star
     group.add(makeAtmosphereShell(body.radius, appearance.color));
+    group.add(makeGlowSprite(body.radius));
   }
 
   return group;
