@@ -412,12 +412,15 @@ export class Simulation {
         return;
       }
 
-      // parachutes pop on their own once it's low and slow enough
+      // parachutes pop on their own once it's low, slow, and descending —
+      // the descent check keeps them stowed during the slow initial liftoff
+      const descending = motion.v.dot(motion.r.normalized()) < 0;
       if (
         !vessel.chuteDeployed &&
         vessel.chuteArea() > 0 &&
         altitude < CHUTE_DEPLOY_ALTITUDE &&
         vAir < CHUTE_SAFE_SPEED &&
+        descending &&
         !motion.landed
       ) {
         vessel.chuteDeployed = true;
