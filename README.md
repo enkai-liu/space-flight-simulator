@@ -32,8 +32,14 @@ pnpm install
 pnpm dev                        # client dev server on :5173
 pnpm --filter @sfs/server dev   # multiplayer server on :8081 (optional for solo play)
 pnpm test                       # 67 physics/protocol/lobby unit tests (vitest)
+pnpm e2e                        # Playwright browser E2E: builder, launch-to-flight, staging, multiplayer
 pnpm typecheck                  # strict TS across all packages
 ```
+
+The E2E suite starts both servers itself and asserts against `window.__sfs`, a
+dev-only deterministic state handle exposed by the flight screen — tests check
+physics truth (altitude climbing, stage counts, two vessels in a shared lobby)
+rather than pixels. CI runs unit tests, typecheck, and E2E on every push.
 
 Multiplayer locally: open two browser tabs, set a pilot name in each, HOST in
 one (the lobby code appears as a toast in flight), JOIN with that code in the
