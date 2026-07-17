@@ -12,7 +12,7 @@ import type { ServerMessage, VesselSnapshot, WireMotion } from '@sfs/protocol';
 import { BODY_APPEARANCE, PART_CATALOG, SOLAR_SYSTEM } from '@sfs/data';
 import { FloatingOrigin, simToRender } from '../render/FloatingOrigin.js';
 import { createBodyObject } from '../render/PlanetRenderer.js';
-import { createStarfield } from '../render/Skybox.js';
+import { createSky } from '../render/Skybox.js';
 import { OrbitCamera } from '../render/OrbitCamera.js';
 import { VesselRenderer } from '../render/VesselRenderer.js';
 import { LaunchSite } from '../render/LaunchSite.js';
@@ -71,7 +71,7 @@ export function startFlight(
   // --- flight scene ---
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.5, 1e13);
-  scene.add(createStarfield());
+  scene.add(createSky());
   const sunLight = new THREE.DirectionalLight(0xfff4e0, 2.2);
   scene.add(sunLight);
   scene.add(new THREE.AmbientLight(0x445566, 0.5));
