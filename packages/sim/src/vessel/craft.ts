@@ -41,18 +41,25 @@ export interface CraftPart {
   iid: number;
   /** PartDef id */
   part: string;
-  /**
-   * Stack parts: x = 0, y = index in the stack (0 = bottom).
-   * Side parts: x = ±1 (mirror side), y = iid of the stack part they attach to.
-   */
+  /** center x in meters (grid-snapped by the builder) */
   x: number;
+  /** bottom y in meters (0 = launch pad) */
   y: number;
+  /** side parts (fins): iid of the stack part they attach to */
+  host?: number;
 }
 
 export interface CraftDesign {
-  format: 1;
+  format: 2;
   name: string;
   parts: CraftPart[];
+}
+
+/** Pre-free-placement format: stack y = ordinal, side parts x = ±1 / y = host iid. */
+export interface LegacyCraftDesign {
+  format: 1;
+  name: string;
+  parts: Array<{ iid: number; part: string; x: number; y: number }>;
 }
 
 export interface CraftIssue {
@@ -61,16 +68,62 @@ export interface CraftIssue {
 }
 
 export function isStackPart(p: CraftPart): boolean {
-  return p.x === 0;
+  return p.host === undefined;
 }
 
-/** Stack parts ordered bottom → top. */
+/** Stack parts ordered bottom → top by position. */
 export function stackOf(design: CraftDesign): CraftPart[] {
   return design.parts.filter(isStackPart).sort((a, b) => a.y - b.y);
 }
 
 export function sidePartsOn(design: CraftDesign, stackIid: number): CraftPart[] {
-  return design.parts.filter((p) => !isStackPart(p) && p.y === stackIid);
+  return design.parts.filter((p) => p.host === stackIid);
+}
+
+/** Positions match when within this tolerance — covers float drift in summed grid coords. */
+export const ATTACH_EPS = 0.01;
+
+/** True when `upper` sits exactly on `lower` (same column, touching faces). */
+export function partsTouch(lower: CraftPart, lowerDef: PartDef, upper: CraftPart): boolean {
+  return (
+    Math.abs(lower.x - upper.x) < ATTACH_EPS &&
+    Math.abs(lower.y + lowerDef.shape.height - upper.y) < ATTACH_EPS
+  );
+}
+
+/**
+ * Convert a legacy ordinal-stack design (format 1) to free positions
+ * (format 2). Stack ordinals become cumulative heights; side parts get real
+ * flank positions and an explicit host reference.
+ */
+export function migrateCraft(
+  design: CraftDesign | LegacyCraftDesign,
+  catalog: Map<string, PartDef>,
+): CraftDesign {
+  if (design.format !== 1) return design;
+  const parts: CraftPart[] = [];
+  const hostPos = new Map<number, { x: number; y: number; def: PartDef | undefined }>();
+  let y = 0;
+  const stack = design.parts.filter((p) => p.x === 0).sort((a, b) => a.y - b.y);
+  for (const p of stack) {
+    const def = catalog.get(p.part);
+    hostPos.set(p.iid, { x: 0, y, def });
+    parts.push({ iid: p.iid, part: p.part, x: 0, y });
+    y += def?.shape.height ?? 1;
+  }
+  for (const p of design.parts) {
+    if (p.x === 0) continue;
+    const host = hostPos.get(p.y);
+    const r = host?.def?.shape.rBottom ?? 0.7;
+    parts.push({
+      iid: p.iid,
+      part: p.part,
+      x: (host?.x ?? 0) + Math.sign(p.x) * r,
+      y: host?.y ?? 0,
+      host: p.y,
+    });
+  }
+  return { format: 2, name: design.name, parts };
 }
 
 /**
@@ -94,13 +147,27 @@ export function validateCraft(design: CraftDesign, catalog: Map<string, PartDef>
     }
     if (!isStackPart(p)) {
       if (!def.attach.side) issues.push({ severity: 'error', message: `${def.title} cannot side-attach` });
-      const host = design.parts.find((q) => q.iid === p.y && isStackPart(q));
+      const host = design.parts.find((q) => q.iid === p.host && isStackPart(q));
       if (!host) issues.push({ severity: 'error', message: `${def.title} attached to missing stack part` });
+    } else if (def.attach.side) {
+      issues.push({ severity: 'error', message: `${def.title} must attach to the side of a stack part` });
     }
   }
 
   const stack = stackOf(design);
   if (stack.length === 0) issues.push({ severity: 'error', message: 'craft has no stack' });
+  for (let i = 1; i < stack.length; i++) {
+    const lower = stack[i - 1]!;
+    const lowerDef = catalog.get(lower.part);
+    if (!lowerDef || !catalog.get(stack[i]!.part)) continue; // unknown parts already reported
+    if (!partsTouch(lower, lowerDef, stack[i]!)) {
+      issues.push({
+        severity: 'error',
+        message: 'parts are not all connected — drag them together until they snap',
+      });
+      break;
+    }
+  }
   const capsules = design.parts.filter((p) => catalog.get(p.part)?.category === 'capsule');
   if (capsules.length !== 1) {
     issues.push({ severity: 'error', message: 'craft needs exactly one command capsule' });

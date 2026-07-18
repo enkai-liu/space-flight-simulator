@@ -43,12 +43,14 @@ export class VesselRenderer {
 
   constructor(design: CraftDesign, catalog: Map<string, PartDef>, envMap?: THREE.Texture) {
     this.envMap = envMap ?? null;
-    // stack heights by iid
-    const heights = new Map<number, { y0: number; def: PartDef }>();
+    // stack heights by iid — the flight model re-packs the (validated,
+    // connected) stack into a column at local x=0 regardless of where the
+    // builder grid placed it; x is kept so fins know which flank they're on
+    const heights = new Map<number, { y0: number; x: number; def: PartDef }>();
     let y = 0;
     for (const part of stackOf(design)) {
       const def = catalog.get(part.part)!;
-      heights.set(part.iid, { y0: y, def });
+      heights.set(part.iid, { y0: y, x: part.x, def });
       y += def.shape.height;
     }
 
@@ -170,7 +172,7 @@ export class VesselRenderer {
   private partMesh(
     part: CraftPart,
     def: PartDef,
-    heights: Map<number, { y0: number; def: PartDef }>,
+    heights: Map<number, { y0: number; x: number; def: PartDef }>,
   ): THREE.Object3D | null {
     const color = CATEGORY_COLORS[def.category] ?? 0x999999;
     // polished metal hull for the big bodywork, duller finish elsewhere
@@ -202,8 +204,9 @@ export class VesselRenderer {
     }
 
     // fin: thin wedge on the host's flank
-    const host = heights.get(part.y);
+    const host = heights.get(part.host ?? -1);
     if (!host) return null;
+    const side = part.x >= host.x ? 1 : -1;
     const shape = new THREE.Shape();
     shape.moveTo(0, height);
     shape.lineTo(0, 0);
@@ -212,8 +215,8 @@ export class VesselRenderer {
     shape.closePath();
     const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.06, bevelEnabled: false });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(part.x * host.def.shape.rBottom, host.y0, -0.03);
-    if (part.x < 0) mesh.scale.x = -1;
+    mesh.position.set(side * host.def.shape.rBottom, host.y0, -0.03);
+    if (side < 0) mesh.scale.x = -1;
     return mesh;
   }
 
@@ -234,34 +237,30 @@ export class VesselRenderer {
       side: THREE.DoubleSide,
     });
 
+    // straight-sided cone from the exit up to the throat, matching the
+    // builder's tall-triangle bell profile
     const throat = Math.max(0.06, rBottom * 0.3);
+    const bellTop = h * 0.78;
     const profile = [
-      new THREE.Vector2(rBottom, 0),
-      new THREE.Vector2(rBottom * 0.86, h * 0.14),
-      new THREE.Vector2(rBottom * 0.62, h * 0.3),
-      new THREE.Vector2(rBottom * 0.42, h * 0.42),
-      new THREE.Vector2(throat, h * 0.52),
-      new THREE.Vector2(throat * 1.2, h * 0.6),
+      new THREE.Vector2(rBottom * 0.85, 0),
+      new THREE.Vector2(throat, bellTop),
+      new THREE.Vector2(throat * 1.15, bellTop + h * 0.04),
     ];
     group.add(new THREE.Mesh(new THREE.LatheGeometry(profile, 24), dark));
 
     // cooling ribs along the bell
-    for (const p of [profile[1]!, profile[2]!]) {
-      const rib = new THREE.Mesh(new THREE.TorusGeometry(p.x, 0.018, 6, 24), dark);
+    for (const f of [0.25, 0.5]) {
+      const r = rBottom * 0.85 + (throat - rBottom * 0.85) * f;
+      const rib = new THREE.Mesh(new THREE.TorusGeometry(r, 0.018, 6, 24), dark);
       rib.rotation.x = Math.PI / 2;
-      rib.position.y = p.y;
+      rib.position.y = bellTop * f;
       group.add(rib);
     }
 
     // mount block mating with the part above
-    const mount = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rTop * 0.8, h * 0.45, 24), mountMaterial);
-    mount.position.y = h * 0.775;
+    const mount = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rTop * 0.8, h * 0.22, 24), mountMaterial);
+    mount.position.y = h * 0.89;
     group.add(mount);
-
-    // turbopump machinery tucked beside the throat
-    const pump = new THREE.Mesh(new THREE.CylinderGeometry(rBottom * 0.16, rBottom * 0.16, h * 0.3, 12), dark);
-    pump.position.set(rBottom * 0.42, h * 0.6, 0);
-    group.add(pump);
 
     return group;
   }

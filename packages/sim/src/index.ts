@@ -33,8 +33,18 @@ export {
   stackOf,
   sidePartsOn,
   isStackPart,
+  migrateCraft,
+  partsTouch,
+  ATTACH_EPS,
 } from './vessel/craft.js';
-export type { PartDef, PartCategory, CraftDesign, CraftPart, CraftIssue } from './vessel/craft.js';
+export type {
+  PartDef,
+  PartCategory,
+  CraftDesign,
+  LegacyCraftDesign,
+  CraftPart,
+  CraftIssue,
+} from './vessel/craft.js';
 export { Simulation, TICK_DT, PHYSICS_WARP_TIERS, RAILS_WARP_TIERS } from './Simulation.js';
 export type { SimEvent, SimEventListener } from './Simulation.js';
 export { planTransitions, findSoiEntry, nextRadiusCrossing } from './orbit/soiTransition.js';

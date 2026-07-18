@@ -128,23 +128,23 @@ export const PARTS: PartDef[] = [
 
 export const PART_CATALOG: Map<string, PartDef> = new Map(PARTS.map((p) => [p.id, p]));
 
-/** The stock two-stage orbital launcher as a buildable craft design. */
+/** The stock two-stage orbital launcher as a buildable craft design (y = bottom, meters). */
 export const KARMAN_I_DESIGN: CraftDesign = {
-  format: 1,
+  format: 2,
   name: 'Karman I',
   parts: [
     // bottom stage: hawk + two heavy tanks
     { iid: 1, part: 'engine-hawk', x: 0, y: 0 },
-    { iid: 2, part: 'tank-l', x: 0, y: 1 },
-    { iid: 3, part: 'tank-l', x: 0, y: 2 },
-    { iid: 4, part: 'decoupler-s', x: 0, y: 3 },
+    { iid: 2, part: 'tank-l', x: 0, y: 1.1 },
+    { iid: 3, part: 'tank-l', x: 0, y: 5.5 },
+    { iid: 4, part: 'decoupler-s', x: 0, y: 9.9 },
     // upper stage: kite (shrouded by the decoupler below) + medium tank
-    { iid: 5, part: 'engine-kite', x: 0, y: 4 },
-    { iid: 6, part: 'tank-m', x: 0, y: 5 },
-    { iid: 7, part: 'decoupler-s', x: 0, y: 6 },
+    { iid: 5, part: 'engine-kite', x: 0, y: 10.3 },
+    { iid: 6, part: 'tank-m', x: 0, y: 11.2 },
+    { iid: 7, part: 'decoupler-s', x: 0, y: 14.2 },
     // re-entry section: shield under the capsule, chute on top
-    { iid: 8, part: 'heatshield-mk1', x: 0, y: 7 },
-    { iid: 9, part: 'capsule-mk1', x: 0, y: 8 },
-    { iid: 10, part: 'chute-mk1', x: 0, y: 9 },
+    { iid: 8, part: 'heatshield-mk1', x: 0, y: 14.6 },
+    { iid: 9, part: 'capsule-mk1', x: 0, y: 14.9 },
+    { iid: 10, part: 'chute-mk1', x: 0, y: 16.2 },
   ],
 };

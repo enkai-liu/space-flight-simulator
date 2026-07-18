@@ -3,8 +3,10 @@ import {
   SystemTree,
   Vec3,
   compileCraft,
+  migrateCraft,
   validateCraft,
   type CraftDesign,
+  type LegacyCraftDesign,
   type Vessel,
 } from '@sfs/sim';
 import { PART_CATALOG, SOLAR_SYSTEM } from '@sfs/data';
@@ -125,9 +127,10 @@ export class Lobby {
     return [...this.players.values()].every((p) => !p.connected) && this.players.size === 0;
   }
 
-  launchVessel(playerId: string, craft: CraftDesign): VesselSnapshot | { error: string } {
+  launchVessel(playerId: string, rawCraft: CraftDesign | LegacyCraftDesign): VesselSnapshot | { error: string } {
     const player = this.players.get(playerId);
     if (!player) return { error: 'not in lobby' };
+    const craft = migrateCraft(rawCraft, PART_CATALOG);
     const errors = validateCraft(craft, PART_CATALOG).filter((i) => i.severity === 'error');
     if (errors.length > 0) return { error: `invalid craft: ${errors[0]!.message}` };
 

@@ -68,14 +68,14 @@ function shieldPath(def: PartDef): string {
   );
 }
 
-/** Bell half-width at f ∈ [0,1] (1 = throat, 0 = exit): concave flare. */
+/** Bell half-width at f ∈ [0,1] (1 = throat, 0 = exit): straight-sided cone. */
 function bellWidth(def: PartDef, f: number): number {
   const throat = def.shape.rTop * 0.32;
   const exit = def.shape.rBottom * 0.85;
-  return throat + (exit - throat) * Math.pow(1 - f, 1.3);
+  return throat + (exit - throat) * (1 - f);
 }
 
-const BELL_TOP = 0.53; // throat height as a fraction of part height
+const BELL_TOP = 0.78; // throat height as a fraction of part height
 const BELL_BOTTOM = 0.03; // exit-plane height, meters
 
 /** Height of the bell profile at f ∈ [0,1] (1 = throat, 0 = exit), meters. */
@@ -216,25 +216,10 @@ function engineArt(def: PartDef): string {
   const plateY = h * 0.91;
   let out = '';
 
-  // feed lines behind the machinery: dark casing under a silver core, sized
-  // to the engine so the small vacuum engine doesn't get chunky plumbing
-  const pipe = (d: string): string =>
-    `<path d="${d}" fill="none" stroke="#26282c" stroke-width="${n(t * 0.22)}" stroke-linecap="round"/>` +
-    `<path d="${d}" fill="none" stroke="#b3b9c2" stroke-width="${n(t * 0.12)}" stroke-linecap="round"/>`;
-  out += pipe(
-    `M ${n(-t * 0.55)} ${n(h * 0.9)} C ${n(-t * 0.68)} ${n(h * 0.82)} ${n(-t * 0.7)} ${n(h * 0.7)} ${n(-t * 0.58)} ${n(h * 0.58)}`,
-  );
-  out += pipe(
-    `M ${n(t * 0.55)} ${n(h * 0.9)} C ${n(t * 0.7)} ${n(h * 0.84)} ${n(t * 0.74)} ${n(h * 0.72)} ${n(t * 0.66)} ${n(h * 0.6)} ` +
-      `L ${n(t * 0.74)} ${n(h * 0.4)} C ${n(t * 0.76)} ${n(h * 0.32)} ${n(t * 0.7)} ${n(h * 0.28)} ${n(t * 0.64)} ${n(h * 0.31)}`,
-  );
-
-  // turbopump: neck down to the throat, ball on top, dark collar ring
+  // turbopump: silver neck widening from the throat up to the mount plate
   out +=
-    `<path d="M ${n(-t * 0.32)} ${n(h * 0.78)} L ${n(-t * 0.26)} ${n(h * BELL_TOP)} L ${n(t * 0.26)} ${n(h * BELL_TOP)} L ${n(t * 0.32)} ${n(h * 0.78)} Z"` +
+    `<path d="M ${n(-t * 0.42)} ${n(plateY)} L ${n(-t * 0.26)} ${n(h * BELL_TOP)} L ${n(t * 0.26)} ${n(h * BELL_TOP)} L ${n(t * 0.42)} ${n(plateY)} Z"` +
     ` fill="url(#pgSilver)" ${STROKE}/>`;
-  out += `<ellipse cx="0" cy="${n(h * 0.78)}" rx="${n(t * 0.38)}" ry="${n(h * 0.12)}" fill="url(#pgSilver)" ${STROKE}/>`;
-  out += `<rect x="${n(-t * 0.46)}" y="${n(h * 0.62)}" width="${n(t * 0.92)}" height="${n(h * 0.055)}" fill="#4a4e55" stroke="${OUTLINE}" stroke-width="0.03"/>`;
 
   // mount plate
   out += `<path d="${enginePlatePath(def)}" fill="#868c97" ${STROKE}/>`;

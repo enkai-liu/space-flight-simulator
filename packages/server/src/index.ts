@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { decodeClient, encode, type ServerMessage } from '@sfs/protocol';
-import { validateCraft, type CraftDesign } from '@sfs/sim';
+import { migrateCraft, validateCraft, type CraftDesign, type LegacyCraftDesign } from '@sfs/sim';
 import { PART_CATALOG } from '@sfs/data';
 import { Lobby } from './Lobby.js';
 import { Store } from './store.js';
@@ -39,7 +39,7 @@ const http = createServer((req, res) => {
     });
     req.on('end', () => {
       try {
-        const design = JSON.parse(body) as CraftDesign;
+        const design = migrateCraft(JSON.parse(body) as CraftDesign | LegacyCraftDesign, PART_CATALOG);
         const errors = validateCraft(design, PART_CATALOG).filter((i) => i.severity === 'error');
         if (errors.length > 0) {
           res.writeHead(400, { 'content-type': 'application/json' });
