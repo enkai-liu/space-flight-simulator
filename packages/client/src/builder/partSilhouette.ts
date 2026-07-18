@@ -281,17 +281,21 @@ export function partArt(def: PartDef): string {
   }
 }
 
+/** Hull-white for engine interstages, ablative gold for heat-shield covers. */
+export const SHROUD_TINT_HULL = '#dfe7f2';
+export const SHROUD_TINT_SHIELD = '#e2c286';
+
 /**
- * Interstage fairing drawn over an engine that sits on a decoupler: the shroud
- * spans the engine's slot at the decoupler's width, translucent so the engine
- * reads through it (SFS-style covered second-stage engines).
+ * Interstage fairing drawn over an engine or heat shield that sits on a
+ * decoupler: the shroud spans the part's slot at the decoupler's width,
+ * translucent so the part reads through it (SFS-style covered stages).
  */
-export function shroudMarkup(r: number, y0: number, y1: number): string {
+export function shroudMarkup(r: number, y0: number, y1: number, tint = SHROUD_TINT_HULL): string {
   const hSeam = (y: number): string =>
     `<path d="M ${n(-r)} ${n(y)} L ${n(r)} ${n(y)}" stroke="#141a24" stroke-width="0.025" opacity="0.4"/>`;
   return (
     `<g pointer-events="none">` +
-    `<rect x="${n(-r)}" y="${n(y0)}" width="${n(r * 2)}" height="${n(y1 - y0)}" fill="#dfe7f2" opacity="0.32"` +
+    `<rect x="${n(-r)}" y="${n(y0)}" width="${n(r * 2)}" height="${n(y1 - y0)}" fill="${tint}" opacity="0.32"` +
     ` stroke="${OUTLINE}" stroke-width="0.04"/>` +
     // panel gores
     `<path d="M ${n(-r / 3)} ${n(y0)} L ${n(-r / 3)} ${n(y1)} M ${n(r / 3)} ${n(y0)} L ${n(r / 3)} ${n(y1)}"` +

@@ -9,7 +9,14 @@ import {
   type PartDef,
 } from '@sfs/sim';
 import { PARTS, PART_CATALOG, KARMAN_I_DESIGN } from '@sfs/data';
-import { partIconSvg, partPath, partArt, shroudMarkup, SVG_DEFS } from './partSilhouette.js';
+import {
+  partIconSvg,
+  partPath,
+  partArt,
+  shroudMarkup,
+  SHROUD_TINT_SHIELD,
+  SVG_DEFS,
+} from './partSilhouette.js';
 
 const SAVE_KEY = 'sfs.craft.v1';
 
@@ -365,13 +372,17 @@ export class Builder {
         markup += this.partMarkup(side, sideDef, xOff, y0, side.x < 0);
       }
     }
-    // interstage fairings: an engine sitting on a decoupler is shrouded, so
-    // second-stage engines aren't exposed mid-stack (drawn last, over the part)
+    // interstage fairings: an engine or heat shield sitting on a decoupler is
+    // shrouded, so neither is exposed mid-stack (drawn last, over the part);
+    // heat-shield covers are gold to match the shield and decoupler
     for (let i = 1; i < layout.length; i++) {
       const { def, y0, y1 } = layout[i]!;
       const below = layout[i - 1]!;
-      if (def.category === 'engine' && below.def.category === 'decoupler') {
+      if (below.def.category !== 'decoupler') continue;
+      if (def.category === 'engine') {
         markup += shroudMarkup(below.def.shape.rTop, y0, y1);
+      } else if (def.category === 'heatshield') {
+        markup += shroudMarkup(below.def.shape.rTop, y0, y1, SHROUD_TINT_SHIELD);
       }
     }
     markup += `</g>`;

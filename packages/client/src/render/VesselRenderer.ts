@@ -69,21 +69,23 @@ export class VesselRenderer {
       this.object.add(group);
     }
 
-    // interstage shrouds: an engine sitting directly on a decoupler gets a
-    // translucent fairing that belongs to the section *below*, so it
-    // jettisons with the decoupler like a real interstage
+    // interstage shrouds: an engine or heat shield sitting directly on a
+    // decoupler gets a translucent fairing that belongs to the section
+    // *below*, so it jettisons with the decoupler like a real interstage;
+    // heat-shield covers are gold to match the builder art
     const stack = stackOf(design);
     for (let i = 1; i < stack.length; i++) {
-      const engine = stack[i]!;
+      const covered = stack[i]!;
       const below = stack[i - 1]!;
-      const engineDef = catalog.get(engine.part)!;
+      const coveredDef = catalog.get(covered.part)!;
       const belowDef = catalog.get(below.part)!;
-      if (engineDef.category !== 'engine' || belowDef.category !== 'decoupler') continue;
-      const radius = Math.max(engineDef.shape.rBottom, belowDef.shape.rTop) + 0.06;
+      if (coveredDef.category !== 'engine' && coveredDef.category !== 'heatshield') continue;
+      if (belowDef.category !== 'decoupler') continue;
+      const radius = Math.max(coveredDef.shape.rBottom, belowDef.shape.rTop) + 0.06;
       const shroud = new THREE.Mesh(
-        new THREE.CylinderGeometry(radius, radius, engineDef.shape.height, 24, 1, true),
+        new THREE.CylinderGeometry(radius, radius, coveredDef.shape.height, 24, 1, true),
         new THREE.MeshStandardMaterial({
-          color: 0xf2f4f7,
+          color: coveredDef.category === 'heatshield' ? 0xe2c286 : 0xf2f4f7,
           transparent: true,
           opacity: 0.45,
           roughness: 0.35,
@@ -94,7 +96,7 @@ export class VesselRenderer {
           envMapIntensity: 0.6,
         }),
       );
-      shroud.position.y = heights.get(engine.iid)!.y0 + engineDef.shape.height / 2;
+      shroud.position.y = heights.get(covered.iid)!.y0 + coveredDef.shape.height / 2;
       this.sectionGroups[sectionIndexOf.get(below.iid)!]!.add(shroud);
     }
 
