@@ -72,9 +72,9 @@ export class VesselRenderer {
     }
 
     // interstage shrouds: an engine or heat shield sitting directly on a
-    // decoupler gets a translucent fairing that belongs to the section
-    // *below*, so it jettisons with the decoupler like a real interstage;
-    // heat-shield covers are gold to match the builder art
+    // decoupler gets a solid fairing that belongs to the section *below*, so
+    // it jettisons with the decoupler like a real interstage; heat-shield
+    // covers are gold to match the builder art
     const stack = stackOf(design);
     for (let i = 1; i < stack.length; i++) {
       const covered = stack[i]!;
@@ -88,14 +88,11 @@ export class VesselRenderer {
         new THREE.CylinderGeometry(radius, radius, coveredDef.shape.height, 24, 1, true),
         new THREE.MeshStandardMaterial({
           color: coveredDef.category === 'heatshield' ? 0xe2c286 : 0xf2f4f7,
-          transparent: true,
-          opacity: 0.45,
-          roughness: 0.35,
-          metalness: 0.3,
+          roughness: 0.45,
+          metalness: 0.25,
           side: THREE.DoubleSide,
-          depthWrite: false,
           envMap: this.envMap ?? undefined,
-          envMapIntensity: 0.6,
+          envMapIntensity: 0.35,
         }),
       );
       shroud.position.y = heights.get(covered.iid)!.y0 + coveredDef.shape.height / 2;
@@ -103,7 +100,12 @@ export class VesselRenderer {
     }
 
     // layered exhaust: white-hot core inside an orange sheath, both HDR so
-    // they bloom; per-frame flicker happens in update()
+    // they bloom; per-frame flicker happens in update(). Both cones are
+    // translated so the apex sits at local y=0 — throttle scaling then
+    // stretches the flame downward from the nozzle instead of detaching it.
+    // renderOrder above the ground layers (1-3) and clouds (5): those are
+    // transparent too and would otherwise paint over the non-depth-writing
+    // plume whenever it's seen against them (i.e. viewed from above).
     const outerMaterial = new THREE.MeshBasicMaterial({
       transparent: true,
       opacity: 0.85,
@@ -111,7 +113,10 @@ export class VesselRenderer {
       depthWrite: false,
     });
     outerMaterial.color.setRGB(2.0, 1.3, 0.5);
-    this.plumeOuter = new THREE.Mesh(new THREE.ConeGeometry(0.55, 5, 16), outerMaterial);
+    const outerGeometry = new THREE.ConeGeometry(0.55, 5, 16);
+    outerGeometry.translate(0, -2.5, 0);
+    this.plumeOuter = new THREE.Mesh(outerGeometry, outerMaterial);
+    this.plumeOuter.renderOrder = 10;
 
     const innerMaterial = new THREE.MeshBasicMaterial({
       transparent: true,
@@ -120,8 +125,10 @@ export class VesselRenderer {
       depthWrite: false,
     });
     innerMaterial.color.setRGB(2.8, 2.5, 1.9);
-    this.plumeInner = new THREE.Mesh(new THREE.ConeGeometry(0.26, 3.4, 12), innerMaterial);
-    this.plumeInner.position.y = 0.8;
+    const innerGeometry = new THREE.ConeGeometry(0.26, 3.4, 12);
+    innerGeometry.translate(0, -1.7, 0);
+    this.plumeInner = new THREE.Mesh(innerGeometry, innerMaterial);
+    this.plumeInner.renderOrder = 10;
 
     this.plume = new THREE.Group();
     this.plume.add(this.plumeOuter);
@@ -146,27 +153,45 @@ export class VesselRenderer {
     // HDR so the re-entry shroud blooms once heat builds
     plasmaMaterial.color.setRGB(2.2, 1.0, 0.45);
     this.plasma = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), plasmaMaterial);
+    // same as the plume: draw after the transparent ground/cloud layers
+    this.plasma.renderOrder = 10;
     this.plasma.scale.set(2.2, Math.max(3, y * 0.8), 2.2);
     this.plasma.position.y = y / 2;
     this.plasma.visible = false;
     this.object.add(this.plasma);
 
-    // parachute canopy
+    // parachute: white canopy with gore seams (matching the silver-white
+    // builder art) plus suspension lines down to the stack top
     const canopyMaterial = new THREE.MeshStandardMaterial({
-      color: 0xd4552f,
-      roughness: 0.8,
+      map: makeCanopyTexture(),
+      roughness: 0.85,
+      metalness: 0,
       side: THREE.DoubleSide,
     });
-    this.canopy = new THREE.Mesh(
+    const canopy = new THREE.Mesh(
       new THREE.SphereGeometry(4.5, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2),
       canopyMaterial,
     );
-    this.canopy.visible = false;
-    this.object.add(this.canopy);
+    canopy.position.y = y + 9;
+    const linePoints: THREE.Vector3[] = [];
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2;
+      linePoints.push(new THREE.Vector3(Math.cos(a) * 4.4, y + 9, Math.sin(a) * 4.4));
+      linePoints.push(new THREE.Vector3(0, y + 0.2, 0));
+    }
+    const lines = new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(linePoints),
+      new THREE.LineBasicMaterial({ color: 0xcdd2d8, transparent: true, opacity: 0.85 }),
+    );
+    this.chute = new THREE.Group();
+    this.chute.add(canopy);
+    this.chute.add(lines);
+    this.chute.visible = false;
+    this.object.add(this.chute);
   }
 
   private readonly plasma: THREE.Mesh;
-  private readonly canopy: THREE.Mesh;
+  private readonly chute: THREE.Group;
   private readonly topY: number;
 
   private partMesh(
@@ -175,14 +200,14 @@ export class VesselRenderer {
     heights: Map<number, { y0: number; x: number; def: PartDef }>,
   ): THREE.Object3D | null {
     const color = CATEGORY_COLORS[def.category] ?? 0x999999;
-    // polished metal hull for the big bodywork, duller finish elsewhere
+    // brushed-metal hull: a hint of sheen on the big bodywork, matte elsewhere
     const shiny = def.category === 'tank' || def.category === 'capsule' || def.category === 'nose';
     const material = new THREE.MeshStandardMaterial({
       color,
-      roughness: shiny ? 0.32 : 0.5,
-      metalness: shiny ? 0.8 : 0.45,
+      roughness: shiny ? 0.48 : 0.6,
+      metalness: shiny ? 0.55 : 0.35,
       envMap: this.envMap ?? undefined,
-      envMapIntensity: 0.9,
+      envMapIntensity: 0.45,
     });
     const { rTop, rBottom, height } = def.shape;
 
@@ -230,10 +255,10 @@ export class VesselRenderer {
     const group = new THREE.Group();
     const dark = new THREE.MeshStandardMaterial({
       color: NOZZLE_COLOR,
-      roughness: 0.42,
-      metalness: 0.75,
+      roughness: 0.52,
+      metalness: 0.6,
       envMap: this.envMap ?? undefined,
-      envMapIntensity: 0.9,
+      envMapIntensity: 0.5,
       side: THREE.DoubleSide,
     });
 
@@ -279,8 +304,8 @@ export class VesselRenderer {
       new THREE.Vector2(rTop, h),
       new THREE.Vector2(0.01, h),
     ];
-    material.roughness = 0.38;
-    material.metalness = 0.7;
+    material.roughness = 0.5;
+    material.metalness = 0.5;
     const mesh = new THREE.Mesh(new THREE.LatheGeometry(profile, 28), material);
     mesh.material.side = THREE.DoubleSide;
     return mesh;
@@ -302,7 +327,8 @@ export class VesselRenderer {
     if (thrusting) {
       const bottom = this.sectionBottoms[gone] ?? 0;
       const flicker = 0.92 + Math.random() * 0.16;
-      this.plume.position.y = bottom - 2.2;
+      // apex tucked just inside the engine bell (throat sits ~0.7 up)
+      this.plume.position.y = bottom + 0.45;
       this.plume.scale.set(1, (0.5 + vessel.throttle) * flicker, 1);
       (this.plumeOuter.material as THREE.MeshBasicMaterial).opacity = 0.72 + Math.random() * 0.18;
       this.engineLight.position.y = bottom - 1.2;
@@ -317,7 +343,37 @@ export class VesselRenderer {
     this.plasma.visible = plasmaStrength > 0;
     (this.plasma.material as THREE.MeshBasicMaterial).opacity = plasmaStrength * 0.65;
 
-    this.canopy.visible = vessel.chuteDeployed;
-    if (vessel.chuteDeployed) this.canopy.position.y = this.topY + 9;
+    this.chute.visible = vessel.chuteDeployed;
   }
+}
+
+/** White canopy with subtle alternating gore panels and an orange rim band. */
+function makeCanopyTexture(): THREE.Texture {
+  const w = 256;
+  const h = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  const gores = 12;
+  for (let i = 0; i < gores; i++) {
+    ctx.fillStyle = i % 2 ? '#f6f8fa' : '#e2e6eb';
+    ctx.fillRect((i * w) / gores, 0, w / gores + 1, h);
+  }
+  // seam lines between gores
+  ctx.strokeStyle = 'rgba(90, 98, 110, 0.35)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= gores; i++) {
+    ctx.beginPath();
+    ctx.moveTo((i * w) / gores, 0);
+    ctx.lineTo((i * w) / gores, h);
+    ctx.stroke();
+  }
+  // orange marker band near the skirt (nod to the builder art stripe)
+  ctx.fillStyle = 'rgba(212, 85, 47, 0.9)';
+  ctx.fillRect(0, h * 0.8, w, h * 0.12);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  return texture;
 }

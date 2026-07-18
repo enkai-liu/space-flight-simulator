@@ -11,6 +11,73 @@ import { fbm, makeLcg, makeNoise3 } from './noise.js';
 
 const textureCache = new Map<string, { map: THREE.Texture; roughnessMap: THREE.Texture | null }>();
 
+/** Deterministic per-body noise seed (id hash), shared with the launch site. */
+export function bodyNoiseSeed(bodyId: string): number {
+  let seed = 0;
+  for (const ch of bodyId) seed = (seed * 31 + ch.charCodeAt(0)) | 0;
+  return seed;
+}
+
+/** Sea level in fbm height units for ocean worlds. */
+export const SEA_LEVEL = 0.53;
+
+/**
+ * Body-fixed render-frame direction of the launch pad (equator, longitude 0;
+ * sim (1,0,0) maps to render (1,0,0)).
+ */
+const PAD_DIR = new THREE.Vector3(1, 0, 0);
+
+export interface OceanSampler {
+  /** Terrain height in fbm units at a body-fixed render-frame unit direction. */
+  height(dir: THREE.Vector3): number;
+  /** High-frequency variation used for dust/vegetation mottling. */
+  grain(dir: THREE.Vector3): number;
+  /** Surface color for a height/grain pair (land ramp above SEA_LEVEL, ocean below). */
+  color(height: number, grain: number): [number, number, number];
+  /** Material roughness byte (ocean is glossy for sun glint). */
+  rough(height: number): number;
+}
+
+/**
+ * Shared terrain field for ocean worlds, used by both the planet texture and
+ * the launch-site ground so the two agree exactly where they meet. Around
+ * PAD_DIR the height blends toward steady grassland so the launch site is
+ * guaranteed to sit on a continent rather than mid-ocean.
+ */
+export function makeOceanSampler(bodyId: string, appearance: BodyAppearance): OceanSampler {
+  const seed = bodyNoiseSeed(bodyId);
+  const noise = makeNoise3(seed);
+  const detail = makeNoise3(seed ^ 0x5f3759df);
+  const base = hexToRgb(appearance.color);
+  const accent = hexToRgb(appearance.accentColor);
+  return {
+    height(dir) {
+      const h = fbm(noise, dir.x * 2.4, dir.y * 2.4, dir.z * 2.4, 5);
+      // launch continent: within ~0.18 rad (~108 km) of the pad, pull the
+      // height smoothly up to solid land (0.62 > SEA_LEVEL)
+      const site = Math.max(0, 1 - dir.angleTo(PAD_DIR) / 0.18);
+      const t = site * site * (3 - 2 * site);
+      return h + (0.62 - h) * t;
+    },
+    grain(dir) {
+      return fbm(detail, dir.x * 9, dir.y * 9, dir.z * 9, 3);
+    },
+    color(height, grain) {
+      if (height < SEA_LEVEL) {
+        const depth = (SEA_LEVEL - height) / SEA_LEVEL;
+        return mix(scale(base, 1.05), scale(base, 0.55), depth * 1.6);
+      }
+      const landT = (height - SEA_LEVEL) / (1 - SEA_LEVEL);
+      const rgb = mix(scale(accent, 1.12), scale(accent, 0.6), landT * 1.4);
+      // dusty variation so continents aren't flat green
+      return mix(rgb, scale(accent, 1.35), Math.max(0, grain - 0.55) * 1.2);
+    },
+    rough(height) {
+      return height < SEA_LEVEL ? 45 : 235;
+    },
+  };
+}
+
 function hexToRgb(hex: string): [number, number, number] {
   const n = parseInt(hex.slice(1), 16);
   return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
@@ -58,6 +125,7 @@ function makeSurfaceTextures(
   const noise = makeNoise3(seed);
   const detail = makeNoise3(seed ^ 0x5f3759df);
   const rand = makeLcg(seed >>> 1);
+  const ocean = appearance.ocean ? makeOceanSampler(bodyId, appearance) : null;
 
   const base = hexToRgb(appearance.color);
   const accent = hexToRgb(appearance.accentColor);
@@ -70,7 +138,10 @@ function makeSurfaceTextures(
     const cosT = Math.cos(theta);
     for (let px = 0; px < w; px++) {
       const phi = (px / w) * Math.PI * 2;
-      dir.set(sinT * Math.cos(phi), cosT, sinT * Math.sin(phi));
+      // matches SphereGeometry's UV mapping, whose x is NEGATED
+      // (x = -cos(phi)·sin(theta)) — sample the same mesh-local direction the
+      // texel lands on, so ground-level terrain can line up with this texture
+      dir.set(-sinT * Math.cos(phi), cosT, sinT * Math.sin(phi));
 
       const height = fbm(noise, dir.x * 2.4, dir.y * 2.4, dir.z * 2.4, octaves);
       const grain = fbm(detail, dir.x * 9, dir.y * 9, dir.z * 9, 3);
@@ -88,20 +159,12 @@ function makeSurfaceTextures(
         // granulated photosphere
         const g = 0.88 + 0.24 * height;
         rgb = scale(base, g);
-      } else if (appearance.ocean) {
-        const sea = 0.53;
-        if (height < sea) {
-          // deep→shallow ocean; smooth (low roughness) for sun glint
-          const depth = (sea - height) / sea;
-          rgb = mix(scale(base, 1.05), scale(base, 0.55), depth * 1.6);
-          rough = 45;
-        } else {
-          const landT = (height - sea) / (1 - sea);
-          rgb = mix(scale(accent, 1.12), scale(accent, 0.6), landT * 1.4);
-          // dusty variation so continents aren't flat green
-          rgb = mix(rgb, scale(accent, 1.35), Math.max(0, grain - 0.55) * 1.2);
-          rough = 235;
-        }
+      } else if (ocean) {
+        // shared sampler (includes the guaranteed launch continent) so the
+        // launch-site ground patch matches this texture exactly
+        const oh = ocean.height(dir);
+        rgb = ocean.color(oh, grain);
+        rough = ocean.rough(oh);
       } else {
         // rocky default: two-tone ramp + cratered grain
         const t = Math.max(0, Math.min(1, (height - 0.38) * 3.2));
@@ -154,8 +217,10 @@ function makeSurfaceTextures(
 
 /** Slow-drifting cloud shell for ocean worlds with an atmosphere. */
 function makeCloudLayer(radius: number, seed: number): THREE.Mesh {
-  const w = 512;
-  const h = 256;
+  // planet-wide texture: keep the resolution up and the alpha ramp soft, or
+  // individual cloud blobs read as hard bilinear quads from mid-ascent
+  const w = 1024;
+  const h = 512;
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
@@ -171,14 +236,16 @@ function makeCloudLayer(radius: number, seed: number): THREE.Mesh {
     for (let px = 0; px < w; px++) {
       const phi = (px / w) * Math.PI * 2;
       dir.set(sinT * Math.cos(phi), cosT, sinT * Math.sin(phi));
-      // stretched horizontally for a streaky weather-system look
-      const n = fbm(noise, dir.x * 3, dir.y * 6, dir.z * 3, 5);
-      const a = Math.max(0, n - 0.52) * 4.2;
+      // stretched horizontally for a streaky weather-system look; smoothstep
+      // edge so cloud borders feather out instead of stepping
+      const n = fbm(noise, dir.x * 3, dir.y * 6, dir.z * 3, 6);
+      const t = Math.min(1, Math.max(0, (n - 0.57) / 0.18));
+      const a = t * t * (3 - 2 * t);
       const idx = (py * w + px) * 4;
       image.data[idx] = 255;
       image.data[idx + 1] = 255;
       image.data[idx + 2] = 255;
-      image.data[idx + 3] = Math.min(235, a * 255);
+      image.data[idx + 3] = Math.min(210, a * 230);
     }
   }
   ctx.putImageData(image, 0, 0);
@@ -196,6 +263,10 @@ function makeCloudLayer(radius: number, seed: number): THREE.Mesh {
     }),
   );
   mesh.name = 'clouds';
+  // draw after the launch-site ground layers (renderOrder 1-3) — depth-based
+  // transparent sorting puts this planet-centered shell "farther" than the
+  // terrain cap and would paint the ground over the clouds from above
+  mesh.renderOrder = 5;
   // slow drift relative to the surface; pure decoration, wall-clock driven
   mesh.onBeforeRender = () => {
     mesh.rotation.y = (performance.now() / 1000) * 0.004;
@@ -338,10 +409,14 @@ export function createBodyObject(body: CelestialBodyDef, appearance: BodyAppeara
   const group = new THREE.Group();
   group.name = body.id;
 
-  let seed = 0;
-  for (const ch of body.id) seed = (seed * 31 + ch.charCodeAt(0)) | 0;
+  const seed = bodyNoiseSeed(body.id);
 
-  const geometry = new THREE.SphereGeometry(body.radius, 64, 48);
+  // ocean (landable-launch) worlds get a denser sphere: at 64 segments the
+  // chord error is ~700 m at Terra scale, which reads as huge flat facets
+  // during early ascent; 192 segments brings it under ~80 m
+  const geometry = appearance.ocean
+    ? new THREE.SphereGeometry(body.radius, 192, 128)
+    : new THREE.SphereGeometry(body.radius, 64, 48);
   const { map, roughnessMap } = makeSurfaceTextures(body.id, appearance, seed);
   const material = appearance.emissive
     ? new THREE.MeshBasicMaterial({ map })
@@ -355,6 +430,9 @@ export function createBodyObject(body: CelestialBodyDef, appearance: BodyAppeara
   if (appearance.emissive) material.color.setRGB(2.5, 2.2, 1.6);
   const surface = new THREE.Mesh(geometry, material);
   surface.name = `${body.id}-surface`;
+  // ocean worlds host the launch-site terrain cap at the exact surface
+  // radius; sink the sphere ~90 m so the two never z-fight
+  if (appearance.ocean) surface.scale.setScalar(1 - 1.5e-4);
   group.add(surface);
 
   if (body.atmosphere && appearance.atmosphereColor) {

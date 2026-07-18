@@ -18,7 +18,6 @@ import { VesselRenderer } from '../render/VesselRenderer.js';
 import { LaunchSite } from '../render/LaunchSite.js';
 import { MapView } from '../render/MapView.js';
 import { PostFX } from '../render/PostFX.js';
-import { Trail } from '../render/Trail.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Hud } from '../ui/hud.js';
 import type { NetClient } from '../net/NetClient.js';
@@ -123,12 +122,9 @@ export function startFlight(
     floatingOrigin.register(object, () => tree.globalState(body.id, sim.simTime).r);
   }
 
-  const launchSite = new LaunchSite(tree, 'terra', PAD_LONGITUDE);
+  const launchSite = new LaunchSite(tree, 'terra', PAD_LONGITUDE, BODY_APPEARANCE['terra']!, vesselEnvMap);
   scene.add(launchSite.object);
   floatingOrigin.register(launchSite.object, () => launchSite.globalPosition(sim.simTime));
-
-  const trail = new Trail();
-  scene.add(trail.object);
 
   const ownGlobalPos = (): Vec3 => {
     if (!sim.hasVessel(VESSEL_ID)) return launchSite.globalPosition(sim.simTime);
@@ -138,10 +134,14 @@ export function startFlight(
 
   // --- cameras & map ---
   const orbitCamera = new OrbitCamera(camera, renderer.domElement, 55);
-  orbitCamera.setFocus(ownGlobalPos, 12, () => {
-    const bodyId = sim.hasVessel(VESSEL_ID) ? sim.vesselState(VESSEL_ID).bodyId : 'terra';
-    return tree.globalState(bodyId, sim.simTime).r;
-  });
+  const focusBodyId = (): string =>
+    sim.hasVessel(VESSEL_ID) ? sim.vesselState(VESSEL_ID).bodyId : 'terra';
+  orbitCamera.setFocus(
+    ownGlobalPos,
+    12,
+    () => tree.globalState(focusBodyId(), sim.simTime).r,
+    () => tree.get(focusBodyId()).radius + 2.5,
+  );
   const mapView = new MapView(innerWidth / innerHeight, renderer.domElement);
   let mapActive = false;
 
@@ -352,7 +352,10 @@ export function startFlight(
       orbitCamera.updateOrientation();
 
       for (const [id, object] of bodyObjects) {
-        object.rotation.y = -tree.rotationAngle(id, sim.simTime);
+        // sim rotZ(a) maps to render rotY(+a) under simToRender — a negated
+        // angle here would counter-rotate the surface texture relative to the
+        // launch site, drifting the launch continent away from the pad
+        object.rotation.y = tree.rotationAngle(id, sim.simTime);
       }
       launchSite.updateOrientation(sim.simTime);
       for (const [id, vr] of vesselRenderers) {
@@ -360,10 +363,6 @@ export function startFlight(
           vr.update(sim.getVessel(id));
           vr.object.visible = !sim.getVessel(id).destroyed;
         }
-      }
-
-      if (hasOwn && !sim.getVessel(VESSEL_ID).destroyed) {
-        trail.update(ownGlobalPos(), cameraGlobal, sim.simTime);
       }
 
       const sunRel = simToRender(tree.globalState('helios', sim.simTime).r.sub(cameraGlobal));
@@ -406,6 +405,7 @@ export function startFlight(
     const w = window as unknown as Record<string, unknown>;
     w.__sfs = {
       sim,
+      scene,
       vesselId: VESSEL_ID,
       getFps: () => fps,
       setThrottle: (v: number) => inputs.throttle(v),

@@ -28,6 +28,7 @@ export class OrbitCamera {
 
   private getFocusPos: () => Vec3 = () => Vec3.ZERO;
   private getBodyCenter: () => Vec3 = () => Vec3.ZERO;
+  private getMinCenterDistance: () => number = () => 0;
 
   // pointer state (supports one-finger rotate, two-finger pinch)
   private readonly pointers = new Map<number, { x: number; y: number }>();
@@ -87,10 +88,20 @@ export class OrbitCamera {
     this.radius = clamp(this.radius * factor, this.minRadius, this.maxRadius);
   }
 
-  /** Follow a moving focus; the body center defines the local "up" direction. */
-  setFocus(getFocusPos: () => Vec3, minRadius: number, getBodyCenter: () => Vec3): void {
+  /**
+   * Follow a moving focus; the body center defines the local "up" direction.
+   * getMinCenterDistance (typically body radius + a few meters) keeps the
+   * camera above the terrain so the player can't look under the world.
+   */
+  setFocus(
+    getFocusPos: () => Vec3,
+    minRadius: number,
+    getBodyCenter: () => Vec3,
+    getMinCenterDistance: () => number = () => 0,
+  ): void {
     this.getFocusPos = getFocusPos;
     this.getBodyCenter = getBodyCenter;
+    this.getMinCenterDistance = getMinCenterDistance;
     this.minRadius = minRadius;
     this.radius = clamp(this.radius, this.minRadius, this.maxRadius);
   }
@@ -115,7 +126,19 @@ export class OrbitCamera {
       .add(north.scale(cosPhi * Math.sin(this.theta)))
       .add(up.scale(Math.sin(this.phi)))
       .scale(this.radius);
-    return this.getFocusPos().add(offset);
+    const pos = this.getFocusPos().add(offset);
+
+    // slide along the ground instead of sinking through it
+    const minCenterDistance = this.getMinCenterDistance();
+    if (minCenterDistance > 0) {
+      const center = this.getBodyCenter();
+      const radial = pos.sub(center);
+      const distance = radial.length();
+      if (distance < minCenterDistance) {
+        return center.add(radial.scale(minCenterDistance / distance));
+      }
+    }
+    return pos;
   }
 
   /** Orient the origin-pinned camera toward the focus. Call after FloatingOrigin.update. */
