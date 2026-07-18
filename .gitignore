@@ -8,3 +8,6 @@ playwright-report/
 packages/server/data/
 packages/client/ios/App/build/
 packages/client/ios/DerivedData/
+
+# Claude Code local config & worktrees
+.claude/
