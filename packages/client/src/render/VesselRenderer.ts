@@ -21,6 +21,9 @@ const CATEGORY_COLORS: Record<string, number> = {
   heatshield: 0xc9a45c,
 };
 
+/** Dark nozzle metal matching the builder's engine detail art. */
+const NOZZLE_COLOR = 0x3a3d42;
+
 /**
  * Procedural 3D rocket built from the craft design's part shapes (truncated
  * cones + fin wedges), organized one group per staging section so jettisoned
@@ -51,10 +54,12 @@ export class VesselRenderer {
 
     const sections = craftSections(design, catalog);
     this.totalSections = sections.length;
-    for (const section of sections) {
+    const sectionIndexOf = new Map<number, number>();
+    for (const [index, section] of sections.entries()) {
       const group = new THREE.Group();
       let bottom = Infinity;
       for (const part of section) {
+        sectionIndexOf.set(part.iid, index);
         const mesh = this.partMesh(part, catalog.get(part.part)!, heights);
         if (mesh) group.add(mesh);
         if (isStackPart(part)) bottom = Math.min(bottom, heights.get(part.iid)!.y0);
@@ -62,6 +67,35 @@ export class VesselRenderer {
       this.sectionBottoms.push(bottom === Infinity ? 0 : bottom);
       this.sectionGroups.push(group);
       this.object.add(group);
+    }
+
+    // interstage shrouds: an engine sitting directly on a decoupler gets a
+    // translucent fairing that belongs to the section *below*, so it
+    // jettisons with the decoupler like a real interstage
+    const stack = stackOf(design);
+    for (let i = 1; i < stack.length; i++) {
+      const engine = stack[i]!;
+      const below = stack[i - 1]!;
+      const engineDef = catalog.get(engine.part)!;
+      const belowDef = catalog.get(below.part)!;
+      if (engineDef.category !== 'engine' || belowDef.category !== 'decoupler') continue;
+      const radius = Math.max(engineDef.shape.rBottom, belowDef.shape.rTop) + 0.06;
+      const shroud = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius, radius, engineDef.shape.height, 24, 1, true),
+        new THREE.MeshStandardMaterial({
+          color: 0xf2f4f7,
+          transparent: true,
+          opacity: 0.45,
+          roughness: 0.35,
+          metalness: 0.3,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          envMap: this.envMap ?? undefined,
+          envMapIntensity: 0.6,
+        }),
+      );
+      shroud.position.y = heights.get(engine.iid)!.y0 + engineDef.shape.height / 2;
+      this.sectionGroups[sectionIndexOf.get(below.iid)!]!.add(shroud);
     }
 
     // layered exhaust: white-hot core inside an orange sheath, both HDR so
@@ -135,7 +169,7 @@ export class VesselRenderer {
     part: CraftPart,
     def: PartDef,
     heights: Map<number, { y0: number; def: PartDef }>,
-  ): THREE.Mesh | null {
+  ): THREE.Object3D | null {
     const color = CATEGORY_COLORS[def.category] ?? 0x999999;
     // polished metal hull for the big bodywork, duller finish elsewhere
     const shiny = def.category === 'tank' || def.category === 'capsule' || def.category === 'nose';
@@ -149,6 +183,16 @@ export class VesselRenderer {
     const { rTop, rBottom, height } = def.shape;
 
     if (isStackPart(part)) {
+      if (def.category === 'engine') {
+        const group = this.engineMesh(def, material);
+        group.position.y = heights.get(part.iid)!.y0;
+        return group;
+      }
+      if (def.category === 'heatshield') {
+        const mesh = this.heatshieldMesh(def, material);
+        mesh.position.y = heights.get(part.iid)!.y0;
+        return mesh;
+      }
       const geometry = new THREE.CylinderGeometry(Math.max(rTop, 0.02), rBottom, height, 24);
       const mesh = new THREE.Mesh(geometry, material);
       mesh.position.y = heights.get(part.iid)!.y0 + height / 2;
@@ -168,6 +212,76 @@ export class VesselRenderer {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(part.x * host.def.shape.rBottom, host.y0, -0.03);
     if (part.x < 0) mesh.scale.x = -1;
+    return mesh;
+  }
+
+  /**
+   * Engine as a proper bell: dark ribbed nozzle lathe flaring to rBottom,
+   * with the category-gray mount and a turbopump housing above the throat.
+   * Local y=0 is the bell lip (part bottom).
+   */
+  private engineMesh(def: PartDef, mountMaterial: THREE.MeshStandardMaterial): THREE.Group {
+    const { rTop, rBottom, height: h } = def.shape;
+    const group = new THREE.Group();
+    const dark = new THREE.MeshStandardMaterial({
+      color: NOZZLE_COLOR,
+      roughness: 0.42,
+      metalness: 0.75,
+      envMap: this.envMap ?? undefined,
+      envMapIntensity: 0.9,
+      side: THREE.DoubleSide,
+    });
+
+    const throat = Math.max(0.06, rBottom * 0.3);
+    const profile = [
+      new THREE.Vector2(rBottom, 0),
+      new THREE.Vector2(rBottom * 0.86, h * 0.14),
+      new THREE.Vector2(rBottom * 0.62, h * 0.3),
+      new THREE.Vector2(rBottom * 0.42, h * 0.42),
+      new THREE.Vector2(throat, h * 0.52),
+      new THREE.Vector2(throat * 1.2, h * 0.6),
+    ];
+    group.add(new THREE.Mesh(new THREE.LatheGeometry(profile, 24), dark));
+
+    // cooling ribs along the bell
+    for (const p of [profile[1]!, profile[2]!]) {
+      const rib = new THREE.Mesh(new THREE.TorusGeometry(p.x, 0.018, 6, 24), dark);
+      rib.rotation.x = Math.PI / 2;
+      rib.position.y = p.y;
+      group.add(rib);
+    }
+
+    // mount block mating with the part above
+    const mount = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rTop * 0.8, h * 0.45, 24), mountMaterial);
+    mount.position.y = h * 0.775;
+    group.add(mount);
+
+    // turbopump machinery tucked beside the throat
+    const pump = new THREE.Mesh(new THREE.CylinderGeometry(rBottom * 0.16, rBottom * 0.16, h * 0.3, 12), dark);
+    pump.position.set(rBottom * 0.42, h * 0.6, 0);
+    group.add(pump);
+
+    return group;
+  }
+
+  /**
+   * Heat shield: shallow gold dome, ablative face down, closed on top where
+   * it mates with the capsule. Local y=0 is the dome's lowest point.
+   */
+  private heatshieldMesh(def: PartDef, material: THREE.MeshStandardMaterial): THREE.Mesh {
+    const { rTop, rBottom, height: h } = def.shape;
+    const profile = [
+      new THREE.Vector2(0.02, 0),
+      new THREE.Vector2(rBottom * 0.45, h * 0.12),
+      new THREE.Vector2(rBottom * 0.78, h * 0.4),
+      new THREE.Vector2(rBottom, h * 0.85),
+      new THREE.Vector2(rTop, h),
+      new THREE.Vector2(0.01, h),
+    ];
+    material.roughness = 0.38;
+    material.metalness = 0.7;
+    const mesh = new THREE.Mesh(new THREE.LatheGeometry(profile, 28), material);
+    mesh.material.side = THREE.DoubleSide;
     return mesh;
   }
 
