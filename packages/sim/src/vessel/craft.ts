@@ -7,7 +7,15 @@ import type { StageDef, VesselConfig } from './Vessel.js';
  * validator/compiler.
  */
 
-export type PartCategory = 'capsule' | 'tank' | 'engine' | 'decoupler' | 'fin' | 'nose' | 'parachute';
+export type PartCategory =
+  | 'capsule'
+  | 'tank'
+  | 'engine'
+  | 'decoupler'
+  | 'fin'
+  | 'nose'
+  | 'parachute'
+  | 'heatshield';
 
 export interface PartDef {
   id: string;

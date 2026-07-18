@@ -5,27 +5,31 @@ import { PART_CATALOG, KARMAN_I_DESIGN } from '../src/index.js';
 describe('compileCraft on the stock Karman I design', () => {
   const config = compileCraft(KARMAN_I_DESIGN, PART_CATALOG);
 
-  it('splits into two flight stages at the decoupler', () => {
-    expect(config.stages.length).toBe(2);
+  it('splits into three flight stages at the decouplers', () => {
+    expect(config.stages.length).toBe(3);
   });
 
   it('aggregates masses and drag per section', () => {
-    const [booster, upper] = config.stages;
-    // hawk 1200 + 2×tank-l 2000 + decoupler 120 + 2×fin 90
-    expect(booster!.dryMass).toBeCloseTo(3_410, 5);
+    const [booster, upper, reentry] = config.stages;
+    // hawk 1200 + 2×tank-l 2000 + decoupler 120
+    expect(booster!.dryMass).toBeCloseTo(3_320, 5);
     expect(booster!.fuelMass).toBe(16_000);
     expect(booster!.thrust).toBe(400_000);
-    // kite 450 + 2×tank-s 500 + capsule 800 + chute 80
-    expect(upper!.dryMass).toBeCloseTo(1_830, 5);
+    // kite 450 + tank-m 500 + decoupler 120
+    expect(upper!.dryMass).toBeCloseTo(1_070, 5);
     expect(upper!.fuelMass).toBe(4_000);
     expect(upper!.thrust).toBe(60_000);
+    // heat shield 180 + capsule 800 + chute 80, shielded to the shield's rating
+    expect(reentry!.dryMass).toBeCloseTo(1_060, 5);
+    expect(reentry!.thrust).toBe(0);
+    expect(reentry!.maxHeat).toBe(3_400);
   });
 
   it('has orbital-class performance at Terra', () => {
     const stats = craftStats(config, 9.81);
     expect(stats.twr).toBeGreaterThan(1.3);
     expect(stats.totalDeltaV).toBeGreaterThan(4_500);
-    expect(stats.launchMass).toBeCloseTo(25_240, 0);
+    expect(stats.launchMass).toBeCloseTo(25_450, 0);
   });
 
   it('validates clean', () => {

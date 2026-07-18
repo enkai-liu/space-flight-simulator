@@ -12,7 +12,7 @@ export const PARTS: PartDef[] = [
     massDry: 800,
     dragArea: 0.8,
     maxHeat: 2600,
-    shape: { rTop: 0.2, rBottom: 0.7, height: 1.5 },
+    shape: { rTop: 0.3, rBottom: 0.7, height: 1.3 },
     attach: { top: true, bottom: true },
   },
   {
@@ -21,12 +21,23 @@ export const PARTS: PartDef[] = [
     category: 'parachute',
     massDry: 80,
     // sized so even a full upper stage (~1.8 t) touches down under the
-    // 10 m/s crash threshold (~9.5 m/s); a bare capsule lands at ~6.6 m/s
+    // 10 m/s crash threshold (~9.5 m/s); a shielded capsule lands at ~7 m/s
     parachute: { dragArea: 320 },
     dragArea: 0.1,
     maxHeat: 900,
-    shape: { rTop: 0.08, rBottom: 0.2, height: 0.5 },
+    shape: { rTop: 0.1, rBottom: 0.28, height: 0.45 },
     attach: { top: false, bottom: true },
+  },
+  {
+    id: 'heatshield-mk1',
+    title: 'Mk1 Heat Shield',
+    category: 'heatshield',
+    massDry: 180,
+    // blunt ablative face: big drag, big heat margin for the section it caps
+    dragArea: 0.6,
+    maxHeat: 3400,
+    shape: { rTop: 0.7, rBottom: 0.7, height: 0.3 },
+    attach: { top: true, bottom: true },
   },
   {
     id: 'nose-a',
@@ -68,7 +79,7 @@ export const PARTS: PartDef[] = [
     fuel: 8_000,
     dragArea: 1.4,
     maxHeat: 1200,
-    shape: { rTop: 0.9, rBottom: 0.9, height: 4.4 },
+    shape: { rTop: 0.7, rBottom: 0.7, height: 4.4 },
     attach: { top: true, bottom: true },
   },
   {
@@ -122,18 +133,18 @@ export const KARMAN_I_DESIGN: CraftDesign = {
   format: 1,
   name: 'Karman I',
   parts: [
-    // bottom stage: hawk + two heavy tanks + fins
+    // bottom stage: hawk + two heavy tanks
     { iid: 1, part: 'engine-hawk', x: 0, y: 0 },
     { iid: 2, part: 'tank-l', x: 0, y: 1 },
     { iid: 3, part: 'tank-l', x: 0, y: 2 },
     { iid: 4, part: 'decoupler-s', x: 0, y: 3 },
-    // upper stage: kite + small tanks, capsule + chute
+    // upper stage: kite (shrouded by the decoupler below) + medium tank
     { iid: 5, part: 'engine-kite', x: 0, y: 4 },
-    { iid: 6, part: 'tank-s', x: 0, y: 5 },
-    { iid: 7, part: 'tank-s', x: 0, y: 6 },
-    { iid: 8, part: 'capsule-mk1', x: 0, y: 7 },
-    { iid: 9, part: 'chute-mk1', x: 0, y: 8 },
-    { iid: 10, part: 'fin-a', x: -1, y: 1 },
-    { iid: 11, part: 'fin-a', x: 1, y: 1 },
+    { iid: 6, part: 'tank-m', x: 0, y: 5 },
+    { iid: 7, part: 'decoupler-s', x: 0, y: 6 },
+    // re-entry section: shield under the capsule, chute on top
+    { iid: 8, part: 'heatshield-mk1', x: 0, y: 7 },
+    { iid: 9, part: 'capsule-mk1', x: 0, y: 8 },
+    { iid: 10, part: 'chute-mk1', x: 0, y: 9 },
   ],
 };

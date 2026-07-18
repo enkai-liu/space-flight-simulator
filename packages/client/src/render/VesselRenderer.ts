@@ -18,6 +18,7 @@ const CATEGORY_COLORS: Record<string, number> = {
   fin: 0x7d8aa0,
   nose: 0x9aa4b4,
   parachute: 0xb0563c,
+  heatshield: 0xc9a45c,
 };
 
 /**

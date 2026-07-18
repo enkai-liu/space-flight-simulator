@@ -9,7 +9,7 @@ import {
   type PartDef,
 } from '@sfs/sim';
 import { PARTS, PART_CATALOG, KARMAN_I_DESIGN } from '@sfs/data';
-import { partIconSvg, partPath, partDetail, partColor } from './partSilhouette.js';
+import { partIconSvg, partPath, partArt, shroudMarkup, SVG_DEFS } from './partSilhouette.js';
 
 const SAVE_KEY = 'sfs.craft.v1';
 
@@ -353,7 +353,7 @@ export class Builder {
     const W = H * aspect;
     this.svg.setAttribute('viewBox', `${-W / 2} ${-H + 1.5} ${W} ${H}`);
 
-    let markup = `<g transform="scale(1,-1)">`;
+    let markup = SVG_DEFS + `<g transform="scale(1,-1)">`;
     // launch pad ground line
     markup += `<rect x="${-W / 2}" y="-1.55" width="${W}" height="0.12" fill="#3d4a3a"/>`;
 
@@ -363,6 +363,15 @@ export class Builder {
         const sideDef = PART_CATALOG.get(side.part)!;
         const xOff = side.x * def.shape.rBottom;
         markup += this.partMarkup(side, sideDef, xOff, y0, side.x < 0);
+      }
+    }
+    // interstage fairings: an engine sitting on a decoupler is shrouded, so
+    // second-stage engines aren't exposed mid-stack (drawn last, over the part)
+    for (let i = 1; i < layout.length; i++) {
+      const { def, y0, y1 } = layout[i]!;
+      const below = layout[i - 1]!;
+      if (def.category === 'engine' && below.def.category === 'decoupler') {
+        markup += shroudMarkup(below.def.shape.rTop, y0, y1);
       }
     }
     markup += `</g>`;
@@ -387,8 +396,9 @@ export class Builder {
     const transform = `translate(${x} ${y})${mirror ? ' scale(-1,1)' : ''}`;
     return (
       `<g data-iid="${part.iid}" transform="${transform}" class="craft-part${selected ? ' selected' : ''}">` +
-      `<path d="${partPath(def)}" fill="${partColor(def)}" stroke="${selected ? '#7ec8ff' : '#141a24'}" stroke-width="${selected ? 0.09 : 0.045}"/>` +
-      partDetail(def) +
+      partArt(def) +
+      // transparent copy of the outline: hit region + selection highlight
+      `<path d="${partPath(def)}" fill="transparent" stroke="${selected ? '#7ec8ff' : 'none'}" stroke-width="0.09" stroke-linejoin="round"/>` +
       `</g>`
     );
   }
