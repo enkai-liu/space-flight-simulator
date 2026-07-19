@@ -149,10 +149,28 @@ export function startFlight(
   const homeSurface = bodyObjects.get('terra')?.getObjectByName('terra-surface') ?? null;
   const HOME_SURFACE_MIN_ALT = 25_000;
 
+  // The vessel's physics point is the bottom of the *original* stack; after
+  // staging it sits inside the jettisoned booster, so the camera aims at the
+  // center of the remaining stack instead, offset along the long axis. Eased
+  // so each staging recenters with a glide instead of a snap.
+  let focusOffset: number | null = null;
+  const focusOffsetTarget = (): number => {
+    const vr = vesselRenderers.get(VESSEL_ID);
+    if (!vr || !sim.hasVessel(VESSEL_ID)) return 0;
+    return vr.stackCenterOffset(sim.getVessel(VESSEL_ID));
+  };
+  const easeFocusOffset = (dt: number): void => {
+    const target = focusOffsetTarget();
+    focusOffset =
+      focusOffset === null ? target : focusOffset + (target - focusOffset) * Math.min(1, dt * 6);
+  };
+
   const ownGlobalPos = (): Vec3 => {
     if (!sim.hasVessel(VESSEL_ID)) return launchSite.globalPosition(sim.simTime);
     const { bodyId, r } = sim.vesselState(VESSEL_ID);
-    return tree.globalState(bodyId, sim.simTime).r.add(r);
+    const global = tree.globalState(bodyId, sim.simTime).r.add(r);
+    const axis = sim.getVessel(VESSEL_ID).thrustDirection();
+    return global.add(axis.scale(focusOffset ?? focusOffsetTarget()));
   };
 
   // --- cameras & map ---
@@ -373,6 +391,7 @@ export function startFlight(
     lastFrameAt = now;
 
     sim.advance(dt);
+    easeFocusOffset(dt);
 
     const hasOwn = sim.hasVessel(VESSEL_ID);
     const readout = hasOwn ? sim.vesselReadout(VESSEL_ID) : null;

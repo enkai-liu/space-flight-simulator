@@ -218,6 +218,20 @@ export class VesselRenderer {
   private readonly chute: THREE.Group;
   private readonly topY: number;
 
+  /**
+   * Local-y midpoint of the sections still attached, i.e. the visual center
+   * of what this vessel currently renders. The mesh keeps the full original
+   * stack's coordinates (so debris separates seamlessly), which parks the
+   * object origin at the bottom of the *original* stack — after staging that
+   * point is inside the jettisoned booster, so anything tracking the vessel
+   * (the camera) must aim here instead.
+   */
+  stackCenterOffset(vessel: Vessel): number {
+    const gone = this.totalSections - vessel.stages.length;
+    const bottom = this.sectionBottoms[gone] ?? 0;
+    return (bottom + this.topY) / 2;
+  }
+
   private partMesh(
     part: CraftPart,
     def: PartDef,
