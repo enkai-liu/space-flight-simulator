@@ -88,16 +88,20 @@ export function startFlight(
   // --- simulation ---
   const tree = new SystemTree(SOLAR_SYSTEM);
   const sim = new Simulation(tree);
+  sim.debrisEnabled = true; // jettisoned stages fall as local physics vessels
   const floatingOrigin = new FloatingOrigin();
 
   // In single-player the vessel exists immediately; in multiplayer we wait for
   // the server's authoritative spawn (which also tells us our pad slot).
   let vessel: Vessel | null = null;
   const vesselRenderers = new Map<string, VesselRenderer>();
+  /** craft design per vessel id — debris renderers are built from the parent's */
+  const designByVessel = new Map<string, CraftDesign>();
 
-  function addVesselRenderer(id: string, craft: CraftDesign): VesselRenderer {
-    const vr = new VesselRenderer(craft, PART_CATALOG, vesselEnvMap);
+  function addVesselRenderer(id: string, craft: CraftDesign, onlySection?: number): VesselRenderer {
+    const vr = new VesselRenderer(craft, PART_CATALOG, vesselEnvMap, onlySection);
     vesselRenderers.set(id, vr);
+    if (onlySection === undefined) designByVessel.set(id, craft);
     scene.add(vr.object);
     floatingOrigin.register(vr.object, () => {
       if (!sim.hasVessel(id)) return Vec3.ZERO;
@@ -105,6 +109,15 @@ export function startFlight(
       return tree.globalState(bodyId, sim.simTime).r.add(r);
     });
     return vr;
+  }
+
+  function removeVesselRenderer(id: string): void {
+    const vr = vesselRenderers.get(id);
+    if (!vr) return;
+    scene.remove(vr.object);
+    floatingOrigin.unregister(vr.object);
+    vesselRenderers.delete(id);
+    designByVessel.delete(id);
   }
 
   if (!net) {
@@ -171,6 +184,10 @@ export function startFlight(
       if (sim.hasVessel(VESSEL_ID)) sim.stage(VESSEL_ID);
       net?.send({ type: 'command', cmd: { kind: 'stage' } });
     },
+    engine(iid: number, on: boolean): void {
+      if (sim.hasVessel(VESSEL_ID)) sim.setEngine(VESSEL_ID, iid, on);
+      net?.send({ type: 'command', cmd: { kind: 'engine', iid, on } });
+    },
     warp(factor: number): void {
       if (net) net.send({ type: 'requestWarp', factor });
       else sim.setWarp(factor);
@@ -182,6 +199,7 @@ export function startFlight(
     onThrottle: (v) => inputs.throttle(v),
     onTurnInput: (v) => inputs.turn(v),
     onStage: () => inputs.stage(),
+    onEngineToggle: (iid, on) => inputs.engine(iid, on),
     onToggleMap: () => {
       mapActive = !mapActive;
       hud.setMapActive(mapActive);
@@ -200,6 +218,16 @@ export function startFlight(
   });
 
   sim.onEvent((event) => {
+    // debris renderers track any vessel's staging, own or remote
+    if (event.type === 'debrisSpawned') {
+      const parentDesign = designByVessel.get(event.fromVesselId);
+      if (parentDesign) addVesselRenderer(event.vesselId, parentDesign, event.sectionIndex);
+      return;
+    }
+    if (event.type === 'debrisRemoved') {
+      removeVesselRenderer(event.vesselId);
+      return;
+    }
     if (!('vesselId' in event) || event.vesselId !== VESSEL_ID) return; // own-vessel toasts only
     switch (event.type) {
       case 'liftoff':
@@ -254,8 +282,11 @@ export function startFlight(
       }
       const v = sim.getVessel(localId);
 
-      // stage/fuel/flag sync (authoritative)
-      while (v.stages.length > snapshot.stagesLeft && v.stages.length > 1) v.stages.shift();
+      // stage/fuel/flag sync (authoritative) — staging through the sim so the
+      // jettisoned sections detach as debris here too
+      while (!v.destroyed && v.stages.length > snapshot.stagesLeft && v.stages.length > 1) {
+        sim.stage(localId);
+      }
       snapshot.stageFuel.forEach((fuel, i) => {
         if (v.stages[i]) v.stages[i]!.fuel = fuel;
       });
@@ -277,6 +308,7 @@ export function startFlight(
         v.motion = motionFromWire(snapshot.motion);
         v.heading = snapshot.heading;
         v.throttle = snapshot.throttle;
+        for (const iid of v.engineOn.keys()) v.setEngine(iid, snapshot.enginesOn.includes(iid));
       }
     };
 
@@ -298,11 +330,7 @@ export function startFlight(
           applySnapshot(msg.snapshot, msg.simTime);
           break;
         case 'vesselRemoved': {
-          const vr = vesselRenderers.get(msg.vesselId);
-          if (vr) {
-            scene.remove(vr.object);
-            vesselRenderers.delete(msg.vesselId);
-          }
+          removeVesselRenderer(msg.vesselId);
           if (sim.hasVessel(msg.vesselId)) sim.removeVessel(msg.vesselId);
           break;
         }
@@ -434,6 +462,7 @@ export function startFlight(
         }
       },
       stage: () => inputs.stage(),
+      setEngine: (iid: number, on: boolean) => inputs.engine(iid, on),
       readout: () => sim.vesselReadout(VESSEL_ID),
       vesselIds: () => [...sim.vessels()].map((v) => v.id),
       lobbyCode: () => lobbyCode,

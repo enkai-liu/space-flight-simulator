@@ -32,6 +32,17 @@ describe('compileCraft on the stock Karman I design', () => {
     expect(reentry!.maxHeat).toBe(3_400);
   });
 
+  it('lists each engine part individually for in-flight switching', () => {
+    const [booster, upper, reentry] = config.stages;
+    expect(booster!.engines).toEqual([
+      { iid: 1, title: 'Hawk Engine', thrust: 400_000, ispVac: 290, ispSL: 250 },
+    ]);
+    expect(upper!.engines).toEqual([
+      { iid: 5, title: 'Kite Vacuum Engine', thrust: 60_000, ispVac: 340, ispSL: 120 },
+    ]);
+    expect(reentry!.engines).toEqual([]);
+  });
+
   it('has orbital-class performance at Terra', () => {
     const stats = craftStats(config, 9.81);
     expect(stats.twr).toBeGreaterThan(1.3);

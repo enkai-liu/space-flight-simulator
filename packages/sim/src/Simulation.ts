@@ -8,9 +8,9 @@ import {
   physicsFloorRadius,
   type TransitionPlan,
 } from './orbit/soiTransition.js';
-import { Vessel, MAX_TURN_RATE, G0, type VesselConfig } from './vessel/Vessel.js';
+import { Vessel, MAX_TURN_RATE, G0, type VesselConfig, type StageState } from './vessel/Vessel.js';
 import { rk4Step } from './flight/integrator.js';
-import { vesselAcceleration, fuelFlowRate, surfaceVelocity } from './flight/forces.js';
+import { vesselAcceleration, stageFuelFlows, surfaceVelocity } from './flight/forces.js';
 import { airDensity } from './flight/atmosphere.js';
 
 /** Fixed physics timestep, s (plan §3.1). Never change at runtime. */
@@ -43,12 +43,20 @@ const MAX_PHYSICS_WARP = 4;
 /** Cap on integration sub-steps per advance() call so a slow frame can't spiral. */
 const MAX_TICKS_PER_ADVANCE = 800;
 
+/** Decoupler separation shove imparted to jettisoned debris, m/s. */
+const DEBRIS_SEPARATION_SPEED = 2;
+/** Slow deterministic tumble of free-falling debris (fraction of MAX_TURN_RATE). */
+const DEBRIS_TUMBLE = 0.06;
+
 export type SimEvent =
   | { type: 'liftoff'; vesselId: string }
   | { type: 'landed'; vesselId: string }
   | { type: 'crashed'; vesselId: string }
   | { type: 'stage'; vesselId: string; stagesLeft: number }
   | { type: 'stageEmpty'; vesselId: string }
+  /** a jettisoned section became a debris vessel; sectionIndex is 0-based from the craft's original bottom */
+  | { type: 'debrisSpawned'; vesselId: string; fromVesselId: string; sectionIndex: number }
+  | { type: 'debrisRemoved'; vesselId: string }
   | { type: 'onRails'; vesselId: string }
   | { type: 'offRails'; vesselId: string }
   | { type: 'soiChange'; vesselId: string; fromBodyId: string; toBodyId: string }
@@ -65,6 +73,13 @@ export type SimEventListener = (event: SimEvent) => void;
 export class Simulation {
   simTime = 0;
   warp = 1;
+  /**
+   * When true, staging spawns the jettisoned section as a debris vessel that
+   * falls under gravity. Off by default: the server keeps its authoritative
+   * sim lean (debris is client-side visual physics — it never collides).
+   */
+  debrisEnabled = false;
+  private debrisCounter = 0;
   private readonly vesselMap = new Map<string, Vessel>();
   private readonly listeners: SimEventListener[] = [];
   private accumulator = 0;
@@ -125,13 +140,52 @@ export class Simulation {
     return this.vesselMap.has(id);
   }
 
-  /** Fire the next stage: jettison the spent bottom stage. */
+  /** Fire the next stage: detach the bottom stage, which becomes debris. */
   stage(vesselId: string): void {
     const vessel = this.getVessel(vesselId);
     if (vessel.destroyed) return;
-    if (vessel.jettisonStage()) {
-      this.emit({ type: 'stage', vesselId, stagesLeft: vessel.stages.length });
+    const jettisoned = vessel.jettisonStage();
+    if (!jettisoned) return;
+    this.emit({ type: 'stage', vesselId, stagesLeft: vessel.stages.length });
+    if (this.debrisEnabled) this.spawnDebris(vessel, jettisoned);
+  }
+
+  /** The detached section keeps flying as an uncontrolled physics vessel. */
+  private spawnDebris(parent: Vessel, jettisoned: StageState): void {
+    // 0-based section index in the original craft (for renderers)
+    const sectionIndex = parent.initialStageCount - parent.stages.length - 1;
+    const id = `${parent.id}-debris-${++this.debrisCounter}`;
+
+    let motion: Vessel['motion'];
+    const pm = parent.motion;
+    if (pm.kind === 'physics') {
+      // a small retrograde decoupler shove separates the trajectories even
+      // with the parent's engines off; landed debris just stays on the pad
+      const v = pm.landed
+        ? pm.v
+        : pm.v.sub(parent.thrustDirection().scale(DEBRIS_SEPARATION_SPEED));
+      motion = { kind: 'physics', bodyId: pm.bodyId, r: pm.r, v, landed: pm.landed };
+    } else {
+      motion = { kind: 'rails', orbit: { ...pm.orbit } };
     }
+
+    const debris = new Vessel(
+      id,
+      `${parent.name} debris`,
+      { name: `${parent.name} debris`, stages: [jettisoned.def], debris: true },
+      motion,
+    );
+    debris.stages[0]!.fuel = jettisoned.fuel;
+    debris.heading = parent.heading;
+    const falling = pm.kind !== 'physics' || !pm.landed;
+    if (falling) debris.turnInput = this.debrisCounter % 2 ? DEBRIS_TUMBLE : -DEBRIS_TUMBLE;
+    this.vesselMap.set(id, debris);
+    this.emit({ type: 'debrisSpawned', vesselId: id, fromVesselId: parent.id, sectionIndex });
+  }
+
+  private removeDebris(vessel: Vessel): void {
+    this.removeVessel(vessel.id);
+    this.emit({ type: 'debrisRemoved', vesselId: vessel.id });
   }
 
   setThrottle(vesselId: string, throttle: number): void {
@@ -141,16 +195,29 @@ export class Simulation {
     if (vessel.throttle > 0) this.ensureOffRails(vessel);
   }
 
+  /** Switch one engine on or off (engines are addressed by craft part iid). */
+  setEngine(vesselId: string, iid: number, on: boolean): void {
+    const vessel = this.getVessel(vesselId);
+    vessel.setEngine(iid, on);
+    if (on && vessel.throttle > 0) this.ensureOffRails(vessel);
+  }
+
   setTurnInput(vesselId: string, input: number): void {
     this.getVessel(vesselId).turnInput = Math.min(1, Math.max(-1, input));
   }
 
   // ---------------------------------------------------------------- time-warp
 
-  /** Highest warp the current state allows: physics vessels cap warp at 4×. */
+  /**
+   * Highest warp the current state allows: physics vessels cap warp at 4×.
+   * Debris never holds warp hostage — it is culled instead (KSP-style
+   * "unloaded debris") when rails warp starts.
+   */
   maxAllowedWarp(): number {
     for (const vessel of this.vesselMap.values()) {
-      if (!vessel.destroyed && vessel.motion.kind === 'physics') return MAX_PHYSICS_WARP;
+      if (!vessel.destroyed && !vessel.isDebris && vessel.motion.kind === 'physics') {
+        return MAX_PHYSICS_WARP;
+      }
     }
     return RAILS_WARP_TIERS[RAILS_WARP_TIERS.length - 1]!;
   }
@@ -191,6 +258,11 @@ export class Simulation {
       return;
     }
 
+    // integrating debris can't ride an analytic time jump — cull it
+    for (const vessel of [...this.vesselMap.values()]) {
+      if (vessel.isDebris && vessel.motion.kind === 'physics') this.removeDebris(vessel);
+    }
+
     let target = this.simTime + dt;
     for (let guard = 0; guard < 32 && this.simTime < target; guard++) {
       // earliest hard boundary among all rails vessels' plans
@@ -211,6 +283,12 @@ export class Simulation {
       if (boundaryVessel && this.simTime >= boundary) {
         const plan = this.planFor(boundaryVessel);
         if (plan.next && this.simTime >= plan.next.time) {
+          if (plan.next.kind === 'dropToPhysics' && boundaryVessel.isDebris) {
+            // debris re-entering during warp despawns instead of yanking
+            // everyone out of a ×100k jump
+            this.removeDebris(boundaryVessel);
+            continue;
+          }
           this.executeTransition(boundaryVessel, plan.next.kind === 'soiEntry' ? plan.next.targetBodyId : null, plan.next.kind);
           if (plan.next.kind === 'dropToPhysics') {
             // physics takes over: stop warping, discard the rest of the jump
@@ -364,13 +442,18 @@ export class Simulation {
 
     const altitude = motion.r.length() - frameBody.radius;
     this.tickThermalAndChute(vessel, frameBody, altitude);
-    if (vessel.destroyed) return;
+    if (vessel.destroyed) {
+      // burned-up debris despawns instead of lingering as an invisible wreck
+      if (vessel.isDebris) this.removeDebris(vessel);
+      return;
+    }
 
-    // burn propellant
-    const flow = fuelFlowRate(vessel, body, altitude) * TICK_DT;
-    if (flow > 0) {
-      const stage = vessel.activeStage();
-      stage.fuel -= flow;
+    // burn propellant: every firing engine drains its own stage's tanks
+    const flows = stageFuelFlows(vessel, body, altitude);
+    for (let i = 0; i < flows.length; i++) {
+      if (flows[i]! <= 0) continue;
+      const stage = vessel.stages[i]!;
+      stage.fuel -= flows[i]! * TICK_DT;
       if (stage.fuel <= 0) {
         stage.fuel = 0;
         this.emit({ type: 'stageEmpty', vesselId: vessel.id });
@@ -384,7 +467,10 @@ export class Simulation {
         motion.r = motion.r.normalized().scale(frameBody.radius);
         motion.v = surfaceVelocity(frameBody, motion.r);
         motion.landed = true;
+        if (vessel.isDebris) vessel.turnInput = 0; // grounded debris stops tumbling
         this.emit({ type: 'landed', vesselId: vessel.id });
+      } else if (vessel.isDebris) {
+        this.removeDebris(vessel);
       } else {
         vessel.destroyed = true;
         this.emit({ type: 'crashed', vesselId: vessel.id });
@@ -443,10 +529,11 @@ export class Simulation {
     motion.v = surfaceVelocity(body, motion.r);
 
     // a lit engine burns whether or not it lifts the rocket
-    const flow = fuelFlowRate(vessel, body, 0) * TICK_DT;
-    if (flow > 0) {
-      const stage = vessel.activeStage();
-      stage.fuel = Math.max(0, stage.fuel - flow);
+    const flows = stageFuelFlows(vessel, body, 0);
+    for (let i = 0; i < flows.length; i++) {
+      if (flows[i]! <= 0) continue;
+      const stage = vessel.stages[i]!;
+      stage.fuel = Math.max(0, stage.fuel - flows[i]! * TICK_DT);
     }
 
     // liftoff when thrust beats weight
@@ -544,6 +631,7 @@ export class Simulation {
       throttle: vessel.throttle,
       fuel: vessel.activeStage().fuel,
       fuelCapacity: vessel.activeStage().def.fuelMass,
+      engines: vessel.engineList(),
       stagesLeft: vessel.stages.length,
       mass: vessel.mass(),
       landed: vessel.motion.kind === 'physics' && vessel.motion.landed,

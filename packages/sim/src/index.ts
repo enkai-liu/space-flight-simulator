@@ -22,9 +22,15 @@ export { SystemTree } from './bodies/CelestialBody.js';
 export { airDensity, atmosphereFraction } from './flight/atmosphere.js';
 export { rk4Step } from './flight/integrator.js';
 export type { BodyState, AccelerationFn } from './flight/integrator.js';
-export { vesselAcceleration, fuelFlowRate, surfaceVelocity, bodyAngularVelocity } from './flight/forces.js';
+export {
+  vesselAcceleration,
+  fuelFlowRate,
+  stageFuelFlows,
+  surfaceVelocity,
+  bodyAngularVelocity,
+} from './flight/forces.js';
 export { Vessel, MAX_TURN_RATE, G0 } from './vessel/Vessel.js';
-export type { StageDef, VesselConfig, VesselMotion, StageState } from './vessel/Vessel.js';
+export type { StageDef, EngineDef, VesselConfig, VesselMotion, StageState } from './vessel/Vessel.js';
 export {
   validateCraft,
   compileCraft,

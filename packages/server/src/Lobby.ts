@@ -71,6 +71,7 @@ export class Lobby {
       heading: vessel.heading,
       throttle: vessel.throttle,
       stageFuel: vessel.stages.map((s) => s.fuel),
+      enginesOn: [...vessel.engineOn].filter(([, on]) => on).map(([iid]) => iid),
       stagesLeft: vessel.stages.length,
       destroyed: vessel.destroyed,
       chuteDeployed: vessel.chuteDeployed,
@@ -166,6 +167,9 @@ export class Lobby {
         break;
       case 'heading':
         this.sim.getVessel(player.vesselId).heading = cmd.value;
+        break;
+      case 'engine':
+        this.sim.setEngine(player.vesselId, cmd.iid, cmd.on);
         break;
       case 'stage':
         this.sim.stage(player.vesselId);

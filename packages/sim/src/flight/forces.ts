@@ -56,10 +56,21 @@ export function vesselAcceleration(body: CelestialBodyDef, vessel: Vessel): Acce
   };
 }
 
-/** Propellant mass-flow rate at the vessel's current thrust, kg/s. */
+/**
+ * Propellant mass-flow rate per stage, kg/s — each stage's firing engines
+ * drain that stage's own tanks (index-aligned with vessel.stages).
+ */
+export function stageFuelFlows(vessel: Vessel, body: CelestialBodyDef, altitude: number): number[] {
+  if (vessel.throttle <= 0) return vessel.stages.map(() => 0);
+  const frac = atmosphereFraction(body.atmosphere, altitude);
+  return vessel.stages.map((_, i) => {
+    const thrust = vessel.stageThrust(i) * vessel.throttle;
+    if (thrust <= 0) return 0;
+    return thrust / (vessel.stageIsp(i, frac) * 9.80665);
+  });
+}
+
+/** Total propellant mass-flow rate at the vessel's current thrust, kg/s. */
 export function fuelFlowRate(vessel: Vessel, body: CelestialBodyDef, altitude: number): number {
-  const thrust = vessel.currentThrust();
-  if (thrust <= 0) return 0;
-  const isp = vessel.effectiveIsp(atmosphereFraction(body.atmosphere, altitude));
-  return thrust / (isp * 9.80665);
+  return stageFuelFlows(vessel, body, altitude).reduce((sum, f) => sum + f, 0);
 }

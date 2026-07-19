@@ -26,6 +26,11 @@ export class FloatingOrigin {
     this.entries.push({ object, getGlobalPos });
   }
 
+  unregister(object: THREE.Object3D): void {
+    const index = this.entries.findIndex((e) => e.object === object);
+    if (index >= 0) this.entries.splice(index, 1);
+  }
+
   /** Reposition all registered objects relative to the camera's global position. */
   update(cameraGlobalPos: Vec3): void {
     for (const { object, getGlobalPos } of this.entries) {

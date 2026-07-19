@@ -8,10 +8,19 @@ export interface HudCallbacks {
   onThrottle(value: number): void;
   onTurnInput(value: number): void;
   onStage(): void;
+  onEngineToggle(iid: number, on: boolean): void;
   onToggleMap(): void;
   onRestart(): void;
   onWarpStep(direction: 1 | -1): void;
   onExitToBuilder(): void;
+}
+
+export interface EngineReadout {
+  iid: number;
+  title: string;
+  on: boolean;
+  hasFuel: boolean;
+  stageIndex: number;
 }
 
 export interface HudReadout {
@@ -22,6 +31,7 @@ export interface HudReadout {
   periapsis: number;
   fuel: number;
   fuelCapacity: number;
+  engines: EngineReadout[];
   stagesLeft: number;
   landed: boolean;
   onRails: boolean;
@@ -60,10 +70,16 @@ export class Hud {
   private heatRow!: HTMLElement;
   private heatFill!: HTMLElement;
   private readonly mapButton: HTMLElement;
+  private readonly enginePanel: HTMLElement;
+  private readonly callbacks: HudCallbacks;
   private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private throttleValue = 0;
+  /** last rendered engine list — rebuilt only when it actually changes */
+  private engines: EngineReadout[] = [];
+  private engineSig = '';
 
   constructor(callbacks: HudCallbacks) {
+    this.callbacks = callbacks;
     this.root = el('div', 'hud', document.body);
 
     // --- readouts (top left) ---
@@ -125,6 +141,9 @@ export class Hud {
     const stageBtn = el('button', 'hud-btn stage-btn', this.root, 'STAGE');
     stageBtn.addEventListener('click', () => callbacks.onStage());
 
+    // --- engine switch panel (bottom center) ---
+    this.enginePanel = el('div', 'engine-wrap', this.root);
+
     // --- rotation controls (bottom left) ---
     const rotWrap = el('div', 'rot-wrap', this.root);
     for (const [label, value] of [
@@ -168,6 +187,10 @@ export class Hud {
       if (e.key === 's' || e.key === 'ArrowDown') this.nudgeThrottle(callbacks, -0.1);
       if (e.key === 'z') this.nudgeThrottle(callbacks, 1);
       if (e.key === 'x') this.nudgeThrottle(callbacks, -1);
+      if (e.key >= '1' && e.key <= '9') {
+        const engine = this.engines[Number(e.key) - 1];
+        if (engine) callbacks.onEngineToggle(engine.iid, !engine.on);
+      }
       if (e.key === ' ') callbacks.onStage();
       if (e.key === 'm') callbacks.onToggleMap();
       if (e.key === '.') callbacks.onWarpStep(1);
@@ -234,6 +257,7 @@ export class Hud {
     this.throttleFill.style.height = `${this.throttleValue * 100}%`;
     const fuelFrac = readout.fuelCapacity > 0 ? readout.fuel / readout.fuelCapacity : 0;
     this.fuelFill.style.height = `${fuelFrac * 100}%`;
+    this.updateEngines(readout.engines);
 
     const heat = Math.min(1, readout.heatFraction);
     this.heatRow.classList.toggle('visible', heat > 0.05);
@@ -245,5 +269,35 @@ export class Hud {
 
   showRecovered(): void {
     this.recoveredOverlay.classList.add('visible');
+  }
+
+  /** Rebuild the engine switch chips only when the engine set/state changes. */
+  private updateEngines(engines: EngineReadout[]): void {
+    const sig = engines
+      .map((e) => `${e.iid}:${e.on ? 1 : 0}:${e.hasFuel ? 1 : 0}:${e.stageIndex}`)
+      .join('|');
+    if (sig === this.engineSig) return;
+    this.engineSig = sig;
+    this.engines = engines;
+
+    this.enginePanel.replaceChildren();
+    this.enginePanel.classList.toggle('visible', engines.length > 0);
+    engines.forEach((engine, index) => {
+      const chip = el('button', 'engine-chip', this.enginePanel);
+      chip.classList.toggle('on', engine.on);
+      chip.classList.toggle('no-fuel', !engine.hasFuel);
+      chip.dataset.testid = `engine-${engine.iid}`;
+      const head = el('div', 'engine-head', chip);
+      el('span', 'engine-dot', head);
+      if (index < 9) el('span', 'engine-key', head, `${index + 1}`);
+      el('div', 'engine-name', chip, engine.title.toUpperCase());
+      el(
+        'div',
+        'engine-meta',
+        chip,
+        !engine.hasFuel ? 'NO FUEL' : engine.on ? 'ON' : 'OFF',
+      );
+      chip.addEventListener('click', () => this.callbacks.onEngineToggle(engine.iid, !engine.on));
+    });
   }
 }

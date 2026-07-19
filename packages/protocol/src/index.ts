@@ -29,6 +29,8 @@ export interface VesselSnapshot {
   throttle: number;
   /** fuel per remaining stage, bottom-first */
   stageFuel: number[];
+  /** part iids of engines currently switched on */
+  enginesOn: number[];
   stagesLeft: number;
   destroyed: boolean;
   chuteDeployed: boolean;
@@ -51,6 +53,7 @@ export type VesselCommand =
   | { kind: 'throttle'; value: number }
   | { kind: 'turnInput'; value: number }
   | { kind: 'heading'; value: number }
+  | { kind: 'engine'; iid: number; on: boolean }
   | { kind: 'stage' };
 
 // --------------------------------------------------------- server → client

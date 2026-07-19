@@ -44,9 +44,21 @@ export class VesselRenderer {
   private readonly envMap: THREE.Texture | null;
 
   private totalSections: number;
+  /**
+   * When set, render exactly this staging section (and its shrouds) forever,
+   * ignoring the vessel's stage count — used for jettisoned-stage debris,
+   * which shares the parent's design and origin so separation is seamless.
+   */
+  private readonly onlySection: number | null;
 
-  constructor(design: CraftDesign, catalog: Map<string, PartDef>, envMap?: THREE.Texture) {
+  constructor(
+    design: CraftDesign,
+    catalog: Map<string, PartDef>,
+    envMap?: THREE.Texture,
+    onlySection?: number,
+  ) {
     this.envMap = envMap ?? null;
+    this.onlySection = onlySection ?? null;
     // stack heights by iid — the flight model re-packs the (validated,
     // connected) stack into a column at local x=0 regardless of where the
     // builder grid placed it; x is kept so fins know which flank they're on
@@ -164,8 +176,11 @@ export class VesselRenderer {
     this.plasma = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), plasmaMaterial);
     // same as the plume: draw after the transparent ground/cloud layers
     this.plasma.renderOrder = 10;
-    this.plasma.scale.set(2.2, Math.max(3, y * 0.8), 2.2);
-    this.plasma.position.y = y / 2;
+    // wrap only the rendered extent: the whole stack, or the locked debris section
+    const plasmaBottom = this.onlySection !== null ? this.sectionBottoms[this.onlySection] ?? 0 : 0;
+    const plasmaTop = this.onlySection !== null ? this.sectionBottoms[this.onlySection + 1] ?? y : y;
+    this.plasma.scale.set(2.2, Math.max(3, (plasmaTop - plasmaBottom) * 0.8), 2.2);
+    this.plasma.position.y = (plasmaBottom + plasmaTop) / 2;
     this.plasma.visible = false;
     this.object.add(this.plasma);
 
@@ -329,7 +344,7 @@ export class VesselRenderer {
   update(vessel: Vessel, groundClearance = Infinity): void {
     const gone = this.totalSections - vessel.stages.length;
     for (let i = 0; i < this.totalSections; i++) {
-      this.sectionGroups[i]!.visible = i >= gone;
+      this.sectionGroups[i]!.visible = this.onlySection !== null ? i === this.onlySection : i >= gone;
     }
 
     const dir = new THREE.Vector3(Math.cos(vessel.heading), 0, -Math.sin(vessel.heading));

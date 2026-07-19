@@ -7,6 +7,16 @@ import type { Orbit } from '../orbit/Orbit.js';
  * its *construction* with the part tree, which will compile down to the same
  * per-stage quantities.
  */
+/** One individually switchable engine within a stage. */
+export interface EngineDef {
+  /** craft part instance id (stable across client/server for commands) */
+  iid: number;
+  title: string;
+  thrust: number;
+  ispVac: number;
+  ispSL: number;
+}
+
 export interface StageDef {
   /** structure mass without fuel, kg */
   dryMass: number;
@@ -16,6 +26,12 @@ export interface StageDef {
   thrust: number;
   ispVac: number;
   ispSL: number;
+  /**
+   * Individually switchable engines summing (at most) to `thrust`. When
+   * absent (legacy aggregate configs) the stage burns as one implicit engine
+   * that only fires while it is the active bottom stage.
+   */
+  engines?: EngineDef[];
   /** drag coefficient × reference area contribution while attached, m² */
   dragArea: number;
   /** parachute Cd·A available in this section, m² */
@@ -31,6 +47,8 @@ export interface VesselConfig {
   name: string;
   /** index 0 = bottom stage, fired first, jettisoned first */
   stages: StageDef[];
+  /** uncontrolled jettisoned hardware: engines stay off, never blocks warp */
+  debris?: boolean;
 }
 
 export type VesselMotion =
@@ -59,6 +77,11 @@ export class Vessel {
   motion: VesselMotion;
   /** remaining stages, [0] = bottom = active */
   readonly stages: StageState[];
+  /** stage count at construction — locates jettisoned sections in the design */
+  readonly initialStageCount: number;
+  readonly isDebris: boolean;
+  /** ignition switch per engine iid; missing iid = engine already jettisoned */
+  readonly engineOn = new Map<number, boolean>();
   /**
    * M1 planar attitude: direction of the vessel's long axis (thrust direction)
    * in the equatorial (XY) plane, measured from +X. Full 3D attitude arrives
@@ -82,6 +105,15 @@ export class Vessel {
   ) {
     if (config.stages.length === 0) throw new Error('vessel needs at least one stage');
     this.stages = config.stages.map((def) => ({ def, fuel: def.fuelMass }));
+    this.initialStageCount = config.stages.length;
+    this.isDebris = config.debris ?? false;
+    // the bottom stage lights at spawn (matching the pre-switch behavior);
+    // upper stages auto-ignite when staging makes them the bottom
+    for (const [index, stage] of config.stages.entries()) {
+      for (const engine of stage.engines ?? []) {
+        this.engineOn.set(engine.iid, index === 0 && !this.isDebris);
+      }
+    }
     this.motion = motion;
   }
 
@@ -112,22 +144,74 @@ export class Vessel {
     return this.activeStage().def.maxHeat ?? DEFAULT_MAX_HEAT;
   }
 
-  /** the stage currently providing thrust (bottom of the remaining stack) */
+  /** the bottom of the remaining stack (fuel gauge, heat shielding) */
   activeStage(): StageState {
     return this.stages[0]!;
   }
 
-  /** effective Isp blended between sea level and vacuum by atmosphere fraction */
-  effectiveIsp(atmosphereFraction: number): number {
-    const { ispVac, ispSL } = this.activeStage().def;
-    return ispVac + (ispSL - ispVac) * atmosphereFraction;
+  /** Flip one engine's ignition switch (unknown/jettisoned iids are ignored). */
+  setEngine(iid: number, on: boolean): void {
+    if (this.engineOn.has(iid)) this.engineOn.set(iid, on);
   }
 
-  /** current thrust magnitude, N (0 when out of fuel or throttled down) */
-  currentThrust(): number {
-    const stage = this.activeStage();
+  /**
+   * Thrust available from one stage at full throttle, N: its switched-on
+   * engines while it has fuel. Legacy aggregate stages (no engine list) fire
+   * only while they are the bottom stage.
+   */
+  stageThrust(index: number): number {
+    const stage = this.stages[index]!;
     if (stage.fuel <= 0) return 0;
-    return stage.def.thrust * this.throttle;
+    const engines = stage.def.engines;
+    if (!engines) return index === 0 ? stage.def.thrust : 0;
+    let thrust = 0;
+    for (const e of engines) if (this.engineOn.get(e.iid)) thrust += e.thrust;
+    return thrust;
+  }
+
+  /**
+   * Effective Isp of one stage's firing engines, thrust-weighted and blended
+   * between sea level and vacuum by atmosphere fraction.
+   */
+  stageIsp(index: number, atmosphereFraction: number): number {
+    const stage = this.stages[index]!;
+    const engines = stage.def.engines;
+    if (!engines) {
+      const { ispVac, ispSL } = stage.def;
+      return ispVac + (ispSL - ispVac) * atmosphereFraction;
+    }
+    let thrust = 0;
+    let weighted = 0;
+    for (const e of engines) {
+      if (!this.engineOn.get(e.iid)) continue;
+      thrust += e.thrust;
+      weighted += e.thrust * (e.ispVac + (e.ispSL - e.ispVac) * atmosphereFraction);
+    }
+    return thrust > 0 ? weighted / thrust : 1;
+  }
+
+  /** current thrust magnitude, N — all firing engines scaled by throttle */
+  currentThrust(): number {
+    let thrust = 0;
+    for (let i = 0; i < this.stages.length; i++) thrust += this.stageThrust(i);
+    return thrust * this.throttle;
+  }
+
+  /** per-engine state for UI/net sync, bottom stage first */
+  engineList(): Array<{ iid: number; title: string; on: boolean; hasFuel: boolean; stageIndex: number }> {
+    const list: Array<{ iid: number; title: string; on: boolean; hasFuel: boolean; stageIndex: number }> = [];
+    for (const [stageIndex, stage] of this.stages.entries()) {
+      for (const e of stage.def.engines ?? []) {
+        list.push({
+          iid: e.iid,
+          title: e.title,
+          on: this.engineOn.get(e.iid) === true,
+          hasFuel: stage.fuel > 0,
+          stageIndex,
+        });
+      }
+    }
+    return list;
   }
 
   /** thrust/long-axis direction as a unit vector in the SOI body frame */
@@ -137,10 +221,14 @@ export class Vessel {
 
   /**
    * Drop the bottom stage. Returns the jettisoned stage state, or null if
-   * this is the last stage (a lone capsule can't discard itself).
+   * this is the last stage (a lone capsule can't discard itself). The newly
+   * exposed stage's engines auto-ignite, KSP-style.
    */
   jettisonStage(): StageState | null {
     if (this.stages.length <= 1) return null;
-    return this.stages.shift() ?? null;
+    const jettisoned = this.stages.shift()!;
+    for (const e of jettisoned.def.engines ?? []) this.engineOn.delete(e.iid);
+    for (const e of this.stages[0]!.def.engines ?? []) this.engineOn.set(e.iid, true);
+    return jettisoned;
   }
 }

@@ -218,6 +218,7 @@ export function compileCraft(design: CraftDesign, catalog: Map<string, PartDef>)
     let dragArea = 0;
     let chuteArea = 0;
     let maxHeat = 0;
+    const engines: NonNullable<StageDef['engines']> = [];
     for (const p of parts) {
       const def = catalog.get(p.part)!;
       dryMass += def.massDry;
@@ -230,6 +231,7 @@ export function compileCraft(design: CraftDesign, catalog: Map<string, PartDef>)
         thrust += def.engine.thrust;
         ispVacWeighted += def.engine.thrust * def.engine.ispVac;
         ispSLWeighted += def.engine.thrust * def.engine.ispSL;
+        engines.push({ iid: p.iid, title: def.title, ...def.engine });
       }
     }
     return {
@@ -238,6 +240,7 @@ export function compileCraft(design: CraftDesign, catalog: Map<string, PartDef>)
       thrust,
       ispVac: thrust > 0 ? ispVacWeighted / thrust : 1,
       ispSL: thrust > 0 ? ispSLWeighted / thrust : 1,
+      engines,
       // nose cones reduce drag but can never make a section a net thruster
       dragArea: Math.max(0.05, dragArea),
       chuteArea,

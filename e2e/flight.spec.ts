@@ -49,6 +49,53 @@ test('staging drops exactly one stage', async ({ page }) => {
   );
 });
 
+test('staging detaches the spent stage as debris and auto-ignites the next engine', async ({
+  page,
+}) => {
+  await launchSolo(page);
+
+  // engine switch panel: Hawk lit, Kite standing by
+  await expect(page.locator('[data-testid=engine-1]')).toHaveClass(/\bon\b/);
+  await expect(page.locator('[data-testid=engine-5]')).not.toHaveClass(/\bon\b/);
+
+  await page.keyboard.press('z');
+  await page.waitForFunction(() => window.__sfs!.readout().altitude > 100, undefined, {
+    timeout: 30_000,
+  });
+  await page.keyboard.press(' '); // stage
+
+  // the jettisoned booster keeps existing as a falling debris vessel
+  await page.waitForFunction(
+    () => window.__sfs!.vesselIds().some((id) => id.includes('debris')),
+    undefined,
+    { timeout: 5_000 },
+  );
+  // and the freshly exposed Kite auto-ignited (chip re-keyed to slot 1)
+  const engines = await page.evaluate(() => window.__sfs!.readout().engines);
+  expect(engines).toHaveLength(1);
+  expect(engines[0]).toMatchObject({ iid: 5, on: true });
+  await expect(page.locator('[data-testid=engine-5]')).toHaveClass(/\bon\b/);
+});
+
+test('engine switches gate thrust: all engines off means no liftoff', async ({ page }) => {
+  await launchSolo(page);
+
+  await page.locator('[data-testid=engine-1]').click(); // shut the Hawk down
+  await expect(page.locator('[data-testid=engine-1]')).not.toHaveClass(/\bon\b/);
+
+  await page.keyboard.press('z'); // full throttle, but nothing is lit
+  await page.waitForTimeout(2_000);
+  const readout = await page.evaluate(() => window.__sfs!.readout());
+  expect(readout.landed).toBe(true);
+  expect(readout.fuel).toBe(readout.fuelCapacity);
+
+  // relight and it flies
+  await page.locator('[data-testid=engine-1]').click();
+  await page.waitForFunction(() => !window.__sfs!.readout().landed, undefined, {
+    timeout: 15_000,
+  });
+});
+
 test('map view toggles with the M key', async ({ page }) => {
   await launchSolo(page);
 

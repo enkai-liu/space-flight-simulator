@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { Vec3 } from '../src/math/vec3.js';
 import { SystemTree } from '../src/bodies/CelestialBody.js';
 import { Simulation, TICK_DT, type SimEvent } from '../src/Simulation.js';
 import type { CelestialBodyDef } from '../src/bodies/CelestialBody.js';
@@ -101,6 +102,149 @@ describe('fuel flow', () => {
     run(sim, 30);
     expect(vessel.activeStage().fuel).toBe(0);
     expect(vessel.currentThrust()).toBe(0);
+  });
+});
+
+// TEST_ROCKET with individually switchable engines (part iids 1 and 5)
+const SWITCH_ROCKET: VesselConfig = {
+  name: 'Switchable',
+  stages: [
+    {
+      dryMass: 4_000,
+      fuelMass: 16_000,
+      thrust: 450_000,
+      ispVac: 290,
+      ispSL: 250,
+      dragArea: 4,
+      engines: [{ iid: 1, title: 'Main', thrust: 450_000, ispVac: 290, ispSL: 250 }],
+    },
+    {
+      dryMass: 800,
+      fuelMass: 2_700,
+      thrust: 60_000,
+      ispVac: 340,
+      ispSL: 120,
+      dragArea: 1.2,
+      engines: [{ iid: 5, title: 'Vac', thrust: 60_000, ispVac: 340, ispSL: 120 }],
+    },
+    { dryMass: 800, fuelMass: 0, thrust: 0, ispVac: 1, ispSL: 1, dragArea: 0.8, engines: [] },
+  ],
+};
+
+describe('engine switches', () => {
+  it('lights only the bottom stage at spawn', () => {
+    const sim = makeSim();
+    const vessel = sim.spawnLanded('v1', SWITCH_ROCKET, 'terra', 0);
+    expect(vessel.engineOn.get(1)).toBe(true);
+    expect(vessel.engineOn.get(5)).toBe(false);
+  });
+
+  it('produces no thrust and burns no fuel with the main engine switched off', () => {
+    const sim = makeSim();
+    const vessel = sim.spawnLanded('v1', SWITCH_ROCKET, 'terra', 0);
+    sim.setEngine('v1', 1, false);
+    sim.setThrottle('v1', 1);
+    run(sim, 5);
+    expect(vessel.currentThrust()).toBe(0);
+    expect(sim.vesselReadout('v1').landed).toBe(true);
+    expect(vessel.stages[0]!.fuel).toBe(16_000);
+  });
+
+  it('a lit upper-stage engine burns its own tank, not the bottom one', () => {
+    const sim = makeSim();
+    const vessel = sim.spawnLanded('v1', SWITCH_ROCKET, 'terra', 0);
+    sim.setEngine('v1', 1, false);
+    sim.setEngine('v1', 5, true);
+    sim.setThrottle('v1', 1);
+    expect(vessel.currentThrust()).toBe(60_000);
+    run(sim, 5);
+    expect(vessel.stages[0]!.fuel).toBe(16_000);
+    expect(vessel.stages[1]!.fuel).toBeLessThan(2_700);
+  });
+
+  it('staging jettisons the old engine switch and auto-ignites the next stage', () => {
+    const sim = makeSim();
+    const vessel = sim.spawnLanded('v1', SWITCH_ROCKET, 'terra', 0);
+    sim.stage('v1');
+    expect(vessel.engineOn.has(1)).toBe(false);
+    expect(vessel.engineOn.get(5)).toBe(true);
+    expect(vessel.engineList()).toEqual([
+      { iid: 5, title: 'Vac', on: true, hasFuel: true, stageIndex: 0 },
+    ]);
+  });
+});
+
+describe('staging debris', () => {
+  it('detaches the spent stage as a falling vessel that despawns on impact', () => {
+    const sim = makeSim();
+    sim.debrisEnabled = true;
+    const events: SimEvent[] = [];
+    sim.onEvent((e) => events.push(e));
+    const vessel = sim.spawnLanded('v1', TEST_ROCKET, 'terra', 0);
+    sim.setThrottle('v1', 1);
+    run(sim, 20); // well clear of the pad
+    sim.setThrottle('v1', 0);
+    const fuelAtSeparation = vessel.stages[0]!.fuel;
+    sim.stage('v1');
+
+    const spawned = events.find((e) => e.type === 'debrisSpawned');
+    expect(spawned).toMatchObject({ fromVesselId: 'v1', sectionIndex: 0 });
+    const debrisId = (spawned as { vesselId: string }).vesselId;
+    const debris = sim.getVessel(debrisId);
+    expect(debris.isDebris).toBe(true);
+    expect(debris.stages.length).toBe(1);
+    // inherits the jettisoned stage's mass and remaining fuel
+    expect(debris.stages[0]!.def.dryMass).toBe(4_000);
+    expect(debris.stages[0]!.fuel).toBe(fuelAtSeparation);
+    expect(debris.currentThrust()).toBe(0);
+
+    // gravity takes over: it falls back and is removed on ground impact
+    run(sim, 120);
+    expect(sim.hasVessel(debrisId)).toBe(false);
+    expect(events.some((e) => e.type === 'debrisRemoved' && e.vesselId === debrisId)).toBe(true);
+  });
+
+  it('spawns no debris when disabled (server default)', () => {
+    const sim = makeSim();
+    const events: SimEvent[] = [];
+    sim.onEvent((e) => events.push(e));
+    sim.spawnLanded('v1', TEST_ROCKET, 'terra', 0);
+    sim.setThrottle('v1', 1);
+    run(sim, 20);
+    sim.stage('v1');
+    expect(events.some((e) => e.type === 'debrisSpawned')).toBe(false);
+    expect([...sim.vessels()].length).toBe(1);
+  });
+
+  it('never blocks warp: physics debris is culled when rails warp starts', () => {
+    const sim = makeSim();
+    sim.debrisEnabled = true;
+    const events: SimEvent[] = [];
+    sim.onEvent((e) => events.push(e));
+    // player safely on rails in a 700 km circular orbit
+    sim.spawnVessel('v1', TEST_ROCKET, {
+      kind: 'rails',
+      orbit: { bodyId: 'terra', a: 700_000, e: 0, i: 0, raan: 0, argPe: 0, m0: 0, epoch: 0 },
+    });
+    // leftover debris still falling through the atmosphere
+    sim.spawnVessel(
+      'd1',
+      { name: 'junk', stages: [TEST_ROCKET.stages[0]!], debris: true },
+      {
+        kind: 'physics',
+        bodyId: 'terra',
+        r: new Vec3(660_000, 0, 0),
+        v: new Vec3(0, 100, 0),
+        landed: false,
+      },
+    );
+
+    expect(sim.maxAllowedWarp()).toBeGreaterThan(4);
+    sim.setWarp(1_000);
+    sim.advance(0.1);
+    expect(sim.hasVessel('d1')).toBe(false);
+    expect(events.some((e) => e.type === 'debrisRemoved' && e.vesselId === 'd1')).toBe(true);
+    expect(sim.hasVessel('v1')).toBe(true);
   });
 });
 

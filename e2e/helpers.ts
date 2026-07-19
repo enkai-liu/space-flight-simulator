@@ -5,6 +5,14 @@ import type { Page } from '@playwright/test';
  * E2E asserts on physics truth through this handle instead of scraping pixels
  * or racing transient toasts.
  */
+export interface SfsEngineReadout {
+  iid: number;
+  title: string;
+  on: boolean;
+  hasFuel: boolean;
+  stageIndex: number;
+}
+
 export interface SfsReadout {
   bodyId: string;
   altitude: number;
@@ -15,6 +23,7 @@ export interface SfsReadout {
   throttle: number;
   fuel: number;
   fuelCapacity: number;
+  engines: SfsEngineReadout[];
   stagesLeft: number;
   mass: number;
   landed: boolean;
@@ -31,6 +40,7 @@ export interface SfsHandle {
   setThrottle(v: number): void;
   setHeading(rad: number): void;
   stage(): void;
+  setEngine(iid: number, on: boolean): void;
   readout(): SfsReadout;
   vesselIds(): string[];
   lobbyCode(): string | null;
