@@ -126,6 +126,16 @@ export function startFlight(
   scene.add(launchSite.object);
   floatingOrigin.register(launchSite.object, () => launchSite.globalPosition(sim.simTime));
 
+  // The home body's opaque surface sphere can't share a depth buffer with
+  // the local scene while the camera sits on it: camera-relative transforms
+  // of a 6,400 km translation lose meters of f32 precision at grazing
+  // incidence, so the sphere's depth wobbles above ground level and stomps
+  // depth-tested transparents like the exhaust plume. Near the pad the
+  // launch-site terrain cap covers the ground completely, so the sphere can
+  // stay hidden until the camera is high enough to see past the cap.
+  const homeSurface = bodyObjects.get('terra')?.getObjectByName('terra-surface') ?? null;
+  const HOME_SURFACE_MIN_ALT = 25_000;
+
   const ownGlobalPos = (): Vec3 => {
     if (!sim.hasVessel(VESSEL_ID)) return launchSite.globalPosition(sim.simTime);
     const { bodyId, r } = sim.vesselState(VESSEL_ID);
@@ -358,9 +368,17 @@ export function startFlight(
         object.rotation.y = tree.rotationAngle(id, sim.simTime);
       }
       launchSite.updateOrientation(sim.simTime);
+      if (homeSurface) {
+        const camAlt =
+          cameraGlobal.sub(tree.globalState('terra', sim.simTime).r).length() -
+          tree.get('terra').radius;
+        homeSurface.visible = camAlt > HOME_SURFACE_MIN_ALT;
+      }
       for (const [id, vr] of vesselRenderers) {
         if (sim.hasVessel(id)) {
-          vr.update(sim.getVessel(id));
+          const { bodyId, r } = sim.vesselState(id);
+          const clearance = r.length() - tree.get(bodyId).radius;
+          vr.update(sim.getVessel(id), clearance);
           vr.object.visible = !sim.getVessel(id).destroyed;
         }
       }

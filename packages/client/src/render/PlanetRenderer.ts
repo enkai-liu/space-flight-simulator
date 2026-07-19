@@ -367,6 +367,10 @@ function makeGlowSprite(radius: number): THREE.Sprite {
 
 /** Additive fresnel-rim shell that fakes an atmosphere from orbit. */
 function makeAtmosphereShell(radius: number, color: string): THREE.Mesh {
+  // raw ShaderMaterials must include the logdepthbuf chunks themselves —
+  // the renderer's logarithmic depth buffer is only wired into built-in
+  // materials, and without them the shell's fragments lose the depth test
+  // against anything behind them (see makePlumeMaterial in VesselRenderer)
   const material = new THREE.ShaderMaterial({
     transparent: true,
     blending: THREE.AdditiveBlending,
@@ -376,6 +380,8 @@ function makeAtmosphereShell(radius: number, color: string): THREE.Mesh {
       uColor: { value: new THREE.Color(color) },
     },
     vertexShader: /* glsl */ `
+      #include <common>
+      #include <logdepthbuf_pars_vertex>
       varying vec3 vNormal;
       varying vec3 vViewDir;
       void main() {
@@ -383,13 +389,17 @@ function makeAtmosphereShell(radius: number, color: string): THREE.Mesh {
         vNormal = normalize(normalMatrix * normal);
         vViewDir = normalize(-mvPos.xyz);
         gl_Position = projectionMatrix * mvPos;
+        #include <logdepthbuf_vertex>
       }
     `,
     fragmentShader: /* glsl */ `
+      #include <common>
+      #include <logdepthbuf_pars_fragment>
       uniform vec3 uColor;
       varying vec3 vNormal;
       varying vec3 vViewDir;
       void main() {
+        #include <logdepthbuf_fragment>
         // BackSide: rim glow strongest at the limb
         float rim = pow(1.0 - abs(dot(vNormal, vViewDir)), 2.0);
         gl_FragColor = vec4(uColor, rim * 0.9);

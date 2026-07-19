@@ -566,6 +566,9 @@ export class LaunchSite {
         roughness: 1,
         metalness: 0,
         transparent: true,
+        // transparent overlays must not write depth: they'd punch invisible
+        // holes into later-drawn transparents like the exhaust plume
+        depthWrite: false,
       }),
     );
     capMesh.renderOrder = 1; // explicit ground stacking: cap < detail < markings
@@ -575,7 +578,7 @@ export class LaunchSite {
     const detailRings = [0, 60, 140, 260, 420, 640, 920, 1260, 1660, 2080, 2500];
     const detailMesh = new THREE.Mesh(
       makeCapGeometry(R, DETAIL_ARC, detailRings, 64),
-      new THREE.MeshStandardMaterial({ map: detail, roughness: 1, metalness: 0, transparent: true }),
+      new THREE.MeshStandardMaterial({ map: detail, roughness: 1, metalness: 0, transparent: true, depthWrite: false }),
     );
     detailMesh.position.z = 0.04;
     detailMesh.renderOrder = 2;
@@ -590,7 +593,7 @@ export class LaunchSite {
     this.object.add(slab);
     const markings = new THREE.Mesh(
       new THREE.CircleGeometry(APRON_R - 0.8, 48),
-      new THREE.MeshStandardMaterial({ map: makeApronTexture(), roughness: 0.95, metalness: 0.02, transparent: true }),
+      new THREE.MeshStandardMaterial({ map: makeApronTexture(), roughness: 0.95, metalness: 0.02, transparent: true, depthWrite: false }),
     );
     markings.position.z = 0.05;
     markings.renderOrder = 3;
